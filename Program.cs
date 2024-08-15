@@ -27,14 +27,14 @@ namespace ChartUploader
 
             folderPath = configuration["AppSettings:FolderPath"];
             containerName = configuration["AppSettings:ContainerName"];
-            
+
             dataJsonPath = Path.Combine(folderPath, "data.json");
 
             //while (true)
             //{
-                await ProcessChartsAsync();
-               // await Task.Delay(TimeSpan.FromMinutes(5));
-           // }
+            await ProcessChartsAsync();
+            // await Task.Delay(TimeSpan.FromMinutes(5));
+            // }
         }
 
         private static void LoadConfiguration()
@@ -52,7 +52,7 @@ namespace ChartUploader
 
         private static async Task ProcessChartsAsync()
         {
-            var chartFiles = Directory.GetFiles(folderPath, "*.jpg");
+            var chartFiles = Directory.GetFiles(folderPath, "*.PNG");
 
             foreach (var chartFile in chartFiles)
             {
@@ -90,11 +90,13 @@ namespace ChartUploader
         private static void UpdateDataJson(string filePath, string ticker, string companyName)
         {
             var chartFileName = Path.GetFileName(filePath);
+            var lastWriteTime = File.GetLastWriteTime(filePath);  // Get the last write time of the file
+
             var chartData = new ChartData
             {
                 TickerSymbol = ticker,
                 CompanyName = companyName,
-                UpdatedDate = DateTime.Now.ToString("yyyy-MM-dd"),
+                UpdatedDate = lastWriteTime.ToString("yyyy-MM-dd"),  // Use the last write time
                 ChartFilename = $"charts/{chartFileName}",
                 Comments = ""
             };
