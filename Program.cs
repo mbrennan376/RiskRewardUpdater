@@ -75,7 +75,7 @@ namespace ChartUploader
             var url = $"https://www.alphavantage.co/query?function=SYMBOL_SEARCH&keywords={ticker}&apikey={apiKey}";
             var response = await httpClient.GetStringAsync(url);
             var searchResults = JsonSerializer.Deserialize<AlphaVantageResponse>(response);
-            return searchResults?.bestMatches?.FirstOrDefault()?.Name ?? "Unknown";
+            return searchResults?.bestMatches?.FirstOrDefault()?.Name ?? "";
         }
 
         private static async Task UploadToAzureBlobAsync(string filePath, string blobName)
