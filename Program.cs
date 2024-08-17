@@ -19,7 +19,10 @@ namespace ChartUploader
         private static string containerName;
         private static string apiKey;
         private static string dataJsonPath;
+        private static string cacheFilePath;
         private static List<ChartData> jsonData = new List<ChartData>();
+        private static Dictionary<string, CachedCompanyData> cache = new Dictionary<string, CachedCompanyData>();
+        private static int refreshCount = 0;
 
         static async Task Main(string[] args)
         {
@@ -29,10 +32,14 @@ namespace ChartUploader
             containerName = configuration["AppSettings:ContainerName"];
 
             dataJsonPath = Path.Combine(folderPath, "data.json");
+            cacheFilePath = Path.Combine(folderPath, "cache.json");
+
+            LoadCache();
 
             //while (true)
             //{
             await ProcessChartsAsync();
+            SaveCache();
             // await Task.Delay(TimeSpan.FromMinutes(5));
             // }
         }
@@ -48,6 +55,21 @@ namespace ChartUploader
 
             storageAccountConnectionString = configuration["AzureStorage:ConnectionString"];
             apiKey = configuration["AlphaVantage:ApiKey"];
+        }
+
+        private static void LoadCache()
+        {
+            if (File.Exists(cacheFilePath))
+            {
+                var cacheContent = File.ReadAllText(cacheFilePath);
+                cache = JsonSerializer.Deserialize<Dictionary<string, CachedCompanyData>>(cacheContent);
+            }
+        }
+
+        private static void SaveCache()
+        {
+            var cacheContent = JsonSerializer.Serialize(cache, new JsonSerializerOptions { WriteIndented = true });
+            File.WriteAllText(cacheFilePath, cacheContent);
         }
 
         private static async Task ProcessChartsAsync()
@@ -71,11 +93,43 @@ namespace ChartUploader
 
         private static async Task<string> GetCompanyNameAsync(string ticker)
         {
+            // Check cache first
+            if (cache.ContainsKey(ticker) && cache[ticker].LastUpdated >= DateTime.Today)
+            {
+                return cache[ticker].CompanyName;
+            }
+
+            // Refresh cache if the item is old and under the refresh limit
+            if (cache.ContainsKey(ticker) && refreshCount < 20)
+            {
+                refreshCount++;
+                return await RefreshCompanyNameAsync(ticker);
+            }
+
+            // If not in cache, fetch from API and cache the result
+            if (!cache.ContainsKey(ticker))
+            {
+                return await RefreshCompanyNameAsync(ticker);
+            }
+
+            return cache[ticker].CompanyName;
+        }
+
+        private static async Task<string> RefreshCompanyNameAsync(string ticker)
+        {
             using var httpClient = new HttpClient();
             var url = $"https://www.alphavantage.co/query?function=SYMBOL_SEARCH&keywords={ticker}&apikey={apiKey}";
             var response = await httpClient.GetStringAsync(url);
             var searchResults = JsonSerializer.Deserialize<AlphaVantageResponse>(response);
-            return searchResults?.bestMatches?.FirstOrDefault()?.Name ?? "";
+            var companyName = searchResults?.bestMatches?.FirstOrDefault()?.Name ?? "Unknown";
+
+            cache[ticker] = new CachedCompanyData
+            {
+                CompanyName = companyName,
+                LastUpdated = DateTime.Now
+            };
+
+            return companyName;
         }
 
         private static async Task UploadToAzureBlobAsync(string filePath, string blobName)
@@ -123,5 +177,11 @@ namespace ChartUploader
     {
         [JsonPropertyName("2. name")]
         public string Name { get; set; }
+    }
+
+    public class CachedCompanyData
+    {
+        public string CompanyName { get; set; }
+        public DateTime LastUpdated { get; set; }
     }
 }
