@@ -1,13 +1,7 @@
-﻿using System;
-using System.IO;
-using System.Linq;
-using System.Net.Http;
-using System.Text.Json;
-using System.Threading.Tasks;
-using Azure.Storage.Blobs;
-using System.Collections.Generic;
+﻿using Azure.Storage.Blobs;
 using Microsoft.Extensions.Configuration;
-using System.Text.Json.Serialization;
+using RiskRewardUpdater.Entities;
+using System.Text.Json;
 
 namespace ChartUploader
 {
@@ -24,6 +18,9 @@ namespace ChartUploader
         private static Dictionary<string, CachedCompanyData> cache = new Dictionary<string, CachedCompanyData>();
         private static int refreshCount = 0;
 
+        // Define the refresh interval constant (28 days)
+        private const int CacheRefreshIntervalDays = 28;
+
         static async Task Main(string[] args)
         {
             LoadConfiguration();
@@ -36,12 +33,8 @@ namespace ChartUploader
 
             LoadCache();
 
-            //while (true)
-            //{
             await ProcessChartsAsync();
             SaveCache();
-            // await Task.Delay(TimeSpan.FromMinutes(5));
-            // }
         }
 
         private static void LoadConfiguration()
@@ -93,20 +86,17 @@ namespace ChartUploader
 
         private static async Task<string> GetCompanyNameAsync(string ticker)
         {
-            // Check cache first
-            if (cache.ContainsKey(ticker) && cache[ticker].LastUpdated >= DateTime.Today)
+            if (cache.ContainsKey(ticker) && cache[ticker].LastUpdated.AddDays(CacheRefreshIntervalDays) >= DateTime.Today)
             {
                 return cache[ticker].CompanyName;
             }
 
-            // Refresh cache if the item is old and under the refresh limit
             if (cache.ContainsKey(ticker) && refreshCount < 20)
             {
                 refreshCount++;
                 return await RefreshCompanyNameAsync(ticker);
             }
 
-            // If not in cache, fetch from API and cache the result
             if (!cache.ContainsKey(ticker))
             {
                 return await RefreshCompanyNameAsync(ticker);
@@ -144,44 +134,18 @@ namespace ChartUploader
         private static void UpdateDataJson(string filePath, string ticker, string companyName)
         {
             var chartFileName = Path.GetFileName(filePath);
-            var lastWriteTime = File.GetLastWriteTime(filePath);  // Get the last write time of the file
+            var lastWriteTime = File.GetLastWriteTime(filePath);
 
             var chartData = new ChartData
             {
                 TickerSymbol = ticker,
                 CompanyName = companyName,
-                UpdatedDate = lastWriteTime.ToString("yyyy-MM-dd"),  // Use the last write time
+                UpdatedDate = lastWriteTime.ToString("yyyy-MM-dd"),
                 ChartFilename = $"charts/{chartFileName}",
                 Comments = ""
             };
 
             jsonData.Add(chartData);
         }
-    }
-
-    public class ChartData
-    {
-        public string TickerSymbol { get; set; }
-        public string CompanyName { get; set; }
-        public string UpdatedDate { get; set; }
-        public string ChartFilename { get; set; }
-        public string Comments { get; set; }
-    }
-
-    public class AlphaVantageResponse
-    {
-        public List<BestMatch> bestMatches { get; set; }
-    }
-
-    public class BestMatch
-    {
-        [JsonPropertyName("2. name")]
-        public string Name { get; set; }
-    }
-
-    public class CachedCompanyData
-    {
-        public string CompanyName { get; set; }
-        public DateTime LastUpdated { get; set; }
     }
 }
