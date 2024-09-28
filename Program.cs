@@ -67,12 +67,18 @@ namespace ChartUploader
 
         private static async Task ProcessChartsAsync()
         {
-            var chartFiles = Directory.GetFiles(folderPath, "*.PNG");
+            var chartFiles = Directory.GetFiles(folderPath, "*.PNG")
+                          .Where(file => !Path.GetFileName(file).StartsWith("b_"))
+                          .ToArray();
+
 
             foreach (var chartFile in chartFiles)
             {
                 var ticker = Path.GetFileNameWithoutExtension(chartFile);
                 var companyName = await GetCompanyNameAsync(ticker);
+                var updatedFile = Path.Combine(Path.GetDirectoryName(chartFile), "b_" + Path.GetFileName(chartFile));
+
+                //ImageProcessor.RemoveVideoBox(chartFile, updatedFile);
 
                 await UploadToAzureBlobAsync(chartFile, $"charts/{Path.GetFileName(chartFile)}");
 
