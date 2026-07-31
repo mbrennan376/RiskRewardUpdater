@@ -18,8 +18,8 @@ namespace ChartUploader
         private static Dictionary<string, CachedCompanyData> cache = new Dictionary<string, CachedCompanyData>();
         private static int refreshCount = 0;
 
-        // Define the refresh interval constant (28 days)
-        private const int CacheRefreshIntervalDays = 28;
+        // Define the refresh interval constant 
+        private const int CacheRefreshIntervalDays = 360;
 
         static async Task Main(string[] args)
         {
