@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Risk/Reward Publisher</title><link rel="stylesheet" href="admin.css"><link rel="stylesheet" href="ai-tools.css">
+</head>
+<body>
+  <header class="topbar">
+    <div><span class="eyebrow">LOCAL PUBLISHER</span><h1>Chart review</h1></div>
+    <div class="target-panel"><span id="targetBadge" class="badge local">Local Preview</span><label class="switch"><input id="targetSwitch" type="checkbox"><span></span></label><button id="openPreview" class="button secondary">Open preview</button></div>
+  </header>
+  <main>
+    <section class="summary-card">
+      <div><strong id="pendingCount">—</strong><span>Pending</span></div><div><strong id="readyCount">—</strong><span>Ready</span></div><div><strong id="skippedCount">—</strong><span>Skipped</span></div>
+      <button id="rescan" class="button secondary">Rescan folder</button><button id="publish" class="button accent">Publish to local preview</button>
+    </section>
+    <div id="message" class="message" role="status"></div>
+    <section id="empty" class="empty" hidden><h2>No changed screenshots</h2><p>The folder matches the last live publication.</p></section>
+    <section id="workspace" class="workspace" hidden>
+      <aside id="queue" class="queue"></aside>
+      <article class="review-card">
+        <div class="image-shell"><img id="chartImage" alt="Chart awaiting review"></div>
+        <form id="reviewForm">
+          <div class="form-heading"><div><span class="eyebrow">REVIEWING</span><h2 id="formTicker"></h2></div><span id="saveState">Saved</span></div>
+          <label>Ticker<input id="ticker" required maxlength="15"></label><label>Company<input id="company" required></label>
+          <div class="two-column"><label>Upper line<input id="upperLine" type="number" min="0" step="any" placeholder="Top boundary"></label><label>Lower line<input id="lowerLine" type="number" min="0" step="any" placeholder="Bottom boundary"></label></div>
+          <p class="hint">Use the numeric upper and lower boundaries regardless of the line colors.</p>
+          <section class="ai-tools">
+            <div><span class="eyebrow">OPTIONAL OPENAI ASSISTANCE</span><p>Each action sends this screenshot to the configured OpenAI API and may incur usage charges. Results always require your review.</p></div>
+            <div class="ai-buttons"><button type="button" id="analyzeLines" class="button secondary">Suggest risk/reward lines</button><button type="button" id="removeVideo" class="button secondary">Remove video box</button></div>
+            <div id="analysisResult" class="analysis-result" hidden></div>
+            <div id="imageChoice" class="image-choice" hidden><span>Edited candidate ready</span><button type="button" id="showOriginal" class="button secondary">Use original</button><button type="button" id="useEdited" class="button secondary">Use edited</button></div>
+          </section>
+          <div class="two-column"><label>Twelve Data symbol<input id="twelveSymbol" placeholder="Defaults to ticker"></label><label>Finnhub symbol<input id="finnhubSymbol" placeholder="Defaults to ticker"></label></div>
+          <label>Comments<textarea id="comments" rows="3"></textarea></label>
+          <div class="actions"><button type="button" id="skip" class="button secondary">Skip</button><button type="button" id="save" class="button secondary">Save draft</button><button type="submit" class="button accent">Mark ready</button></div>
+        </form>
+      </article>
+    </section>
+  </main>
+  <dialog id="liveDialog"><form method="dialog"><span class="eyebrow danger">LIVE SITE</span><h2>Enable live publishing?</h2><p>The price service and chart publisher will use Azure on their next run.</p><label>Type <strong>PUBLISH LIVE</strong><input id="liveConfirmation" autocomplete="off"></label><div class="actions"><button value="cancel" class="button secondary">Cancel</button><button id="confirmLive" value="default" class="button danger-button">Enable live</button></div></form></dialog>
+  <script src="admin.js" defer></script>
+</body>
+</html>

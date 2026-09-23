@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk.Worker">
+  <PropertyGroup><TargetFramework>net8.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable><UserSecretsId>5d663a86-e665-48e0-a2c9-89711c589f3d</UserSecretsId></PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\RiskReward.Core\RiskReward.Core.csproj" />
+    <ProjectReference Include="..\RiskReward.Infrastructure\RiskReward.Infrastructure.csproj" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="8.0.1" />
+    <PackageReference Include="Microsoft.Extensions.Http" Version="8.0.1" />
+  </ItemGroup>
+  <ItemGroup><None Include="..\..\appsettings.json" Link="appsettings.json"><CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory></None></ItemGroup>
+</Project>

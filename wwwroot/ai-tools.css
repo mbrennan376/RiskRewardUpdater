@@ -1,0 +1,77 @@
+.review-card,
+.image-shell,
+.image-shell img,
+.review-card form {
+  min-width: 0;
+}
+
+.image-shell img {
+  width: 100%;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+.switch input {
+  width: 1px;
+  height: 1px;
+}
+
+.ai-tools {
+  display: grid;
+  gap: 12px;
+  margin: 4px 0 18px;
+  padding: 15px;
+  border: 1px solid #29405e;
+  border-radius: 13px;
+  background: linear-gradient(145deg, #112139cc, #0b121ccc);
+}
+
+.ai-tools p {
+  margin: 6px 0 0;
+  color: #91a7bd;
+  font-size: .76rem;
+  line-height: 1.45;
+}
+
+.ai-buttons,
+.image-choice {
+  display: flex;
+  gap: 9px;
+  flex-wrap: wrap;
+}
+
+.ai-buttons .button { flex: 1; }
+
+.analysis-result {
+  padding: 10px 12px;
+  border-left: 3px solid #5794df;
+  border-radius: 5px;
+  background: #0a111b;
+  color: #bad0e6;
+  font-size: .78rem;
+  line-height: 1.5;
+}
+
+.analysis-result.error {
+  border-color: #d84f60;
+  color: #ffacb4;
+}
+
+.image-choice {
+  align-items: center;
+  padding-top: 3px;
+}
+
+.image-choice span {
+  margin-right: auto;
+  color: #73dcb7;
+  font-size: .78rem;
+  font-weight: 700;
+}
+
+.image-choice .button.selected {
+  border-color: #5794df;
+  background: #193357;
+}

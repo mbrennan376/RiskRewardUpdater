@@ -1,0 +1,118 @@
+const state={status:null,charts:[],selected:null};
+const $=id=>document.getElementById(id);
+
+async function request(url,options={}){
+  const response=await fetch(url,{...options,headers:{'Content-Type':'application/json',...(options.headers||{})}});
+  const body=await response.json().catch(()=>null);
+  if(!response.ok)throw new Error(body?.error||`Request failed (${response.status})`);
+  return body;
+}
+
+function showMessage(text='',kind=''){$('message').textContent=text;$('message').className=`message ${kind}`;}
+
+async function load(){
+  showMessage('Scanning screenshot folder…');
+  try{
+    [state.status,state.charts]=await Promise.all([request('/api/status'),request('/api/charts/pending')]);
+    renderTarget();renderQueue();
+    if(state.selected){state.selected=state.charts.find(c=>c.tickerSymbol===state.selected.tickerSymbol)||state.charts[0];}
+    else state.selected=state.charts[0];
+    renderForm();showMessage(`${state.charts.length} changed screenshot${state.charts.length===1?'':'s'} found.`);
+  }catch(error){showMessage(error.message,'error');}
+}
+
+function renderTarget(){
+  const live=state.status.target==='live';
+  $('targetSwitch').checked=live;$('targetBadge').textContent=live?'Live Azure':'Local Preview';$('targetBadge').className=`badge ${live?'live':'local'}`;
+  $('publish').textContent=live?'Publish to LIVE site':'Publish to local preview';
+}
+
+function renderQueue(){
+  $('pendingCount').textContent=state.charts.filter(c=>!c.ready&&!c.skipped).length;
+  $('readyCount').textContent=state.charts.filter(c=>c.ready&&!c.skipped).length;
+  $('skippedCount').textContent=state.charts.filter(c=>c.skipped).length;
+  $('empty').hidden=state.charts.length!==0;$('workspace').hidden=state.charts.length===0;
+  $('queue').replaceChildren(...state.charts.map(chart=>{
+    const button=document.createElement('button');button.className=`queue-item ${state.selected?.tickerSymbol===chart.tickerSymbol?'active':''}`;
+    const strong=document.createElement('strong');strong.textContent=chart.tickerSymbol;
+    const dot=document.createElement('span');dot.className=`dot ${chart.ready?'ready':chart.skipped?'skipped':''}`;
+    const small=document.createElement('small');small.textContent=chart.companyName;
+    button.append(strong,dot,small);button.onclick=()=>{state.selected=chart;renderQueue();renderForm();};return button;
+  }));
+}
+
+function renderForm(){
+  const chart=state.selected;if(!chart)return;
+  $('formTicker').textContent=chart.tickerSymbol;$('ticker').value=chart.tickerSymbol;$('company').value=chart.companyName;
+  $('upperLine').value=chart.upperLine??'';$('lowerLine').value=chart.lowerLine??'';$('comments').value=chart.comments??'';
+  $('twelveSymbol').value=chart.providerSymbols?.twelveData??'';$('finnhubSymbol').value=chart.providerSymbols?.finnhub??'';
+  const imageEndpoint=chart.useEditedImage&&chart.editedImagePath?'edited-image':'source-image';
+  $('chartImage').src=`/api/${imageEndpoint}/${encodeURIComponent(chart.tickerSymbol)}?h=${imageEndpoint==='edited-image'?chart.editedImageHash:chart.imageHash}`;
+  $('analyzeLines').disabled=!state.status.openAiEnabled;$('removeVideo').disabled=!state.status.openAiEnabled;
+  $('analyzeLines').title=state.status.openAiEnabled?'Ask OpenAI to suggest the two numeric boundaries.':'Configure OpenAI:ApiKey to enable this action.';
+  $('removeVideo').title=state.status.openAiEnabled?'Ask OpenAI to produce an edited candidate image.':'Configure OpenAI:ApiKey to enable this action.';
+  const analysis=chart.analysis;
+  $('analysisResult').hidden=!analysis;
+  if(analysis){
+    const confidence=analysis.confidence==null?'':` · ${Math.round(Number(analysis.confidence)*100)}% confidence`;
+    const lines=analysis.suggestedUpperLine!=null&&analysis.suggestedLowerLine!=null?`Suggested upper ${analysis.suggestedUpperLine}, lower ${analysis.suggestedLowerLine}${confidence}. `:'';
+    $('analysisResult').textContent=`${lines}${analysis.explanation||'OpenAI could not determine the chart boundaries.'}`;
+    $('analysisResult').className=`analysis-result ${analysis.status==='suggested'?'':'error'}`;
+  }
+  $('imageChoice').hidden=!chart.editedImagePath;
+  $('showOriginal').classList.toggle('selected',!chart.useEditedImage);$('useEdited').classList.toggle('selected',chart.useEditedImage);
+  $('saveState').textContent=chart.ready?'Ready':chart.skipped?'Skipped':'Draft';
+}
+
+function formValue(ready=false,skipped=false){
+  const number=id=>$(id).value===''?null:Number($(id).value);
+  return {...state.selected,tickerSymbol:$('ticker').value.trim().toUpperCase(),companyName:$('company').value.trim(),upperLine:number('upperLine'),lowerLine:number('lowerLine'),comments:$('comments').value.trim(),providerSymbols:{twelveData:$('twelveSymbol').value.trim(),finnhub:$('finnhubSymbol').value.trim()},ready,skipped};
+}
+
+async function save(ready=false,skipped=false){
+  const original=state.selected.tickerSymbol;$('saveState').textContent='Saving…';
+  try{
+    const saved=await request(`/api/charts/${encodeURIComponent(original)}`,{method:'PUT',body:JSON.stringify(formValue(ready,skipped))});
+    const index=state.charts.findIndex(c=>c.tickerSymbol===original);state.charts[index]=saved;state.selected=saved;renderQueue();renderForm();showMessage(`${saved.tickerSymbol} saved.`,'success');
+  }catch(error){$('saveState').textContent='Not saved';showMessage(error.message,'error');}
+}
+
+$('reviewForm').addEventListener('submit',event=>{event.preventDefault();save(true,false);});
+$('save').onclick=()=>save(false,false);$('skip').onclick=()=>save(false,true);$('rescan').onclick=load;
+$('openPreview').onclick=()=>window.open('/preview/','risk-reward-preview');
+$('targetSwitch').addEventListener('change',async event=>{
+  if(event.target.checked){event.target.checked=false;if(!state.status.allowLivePublishing){showMessage('Live publishing is disabled. Set RiskReward:AllowLivePublishing to true when production is ready.','error');return;}$('liveConfirmation').value='';$('liveDialog').showModal();}
+  else await setTarget('local');
+});
+$('confirmLive').onclick=async event=>{event.preventDefault();await setTarget('live',$('liveConfirmation').value);if(state.status.target==='live')$('liveDialog').close();};
+async function setTarget(target,confirmation=null){try{await request('/api/target',{method:'PUT',body:JSON.stringify({target,confirmation})});state.status.target=target;renderTarget();showMessage(`Deployment target changed to ${target}.`,'success');}catch(error){renderTarget();showMessage(error.message,'error');}}
+async function runAiAction(action,button,busyText){
+  if(!state.selected)return;
+  const ticker=state.selected.tickerSymbol;button.disabled=true;const previous=button.textContent;button.textContent=busyText;
+  showMessage(`Sending ${ticker} to the OpenAI API…`);
+  try{
+    const saved=await request(`/api/charts/${encodeURIComponent(ticker)}/${action}`,{method:'POST'});
+    const index=state.charts.findIndex(c=>c.tickerSymbol===ticker);state.charts[index]=saved;state.selected=saved;renderQueue();renderForm();
+    showMessage(action==='analyze'?`OpenAI suggestions loaded for ${ticker}. Check the values before marking it ready.`:`Edited candidate loaded for ${ticker}. Compare it with the original before publishing.`,'success');
+  }catch(error){showMessage(error.message,'error');}
+  finally{button.textContent=previous;button.disabled=!state.status.openAiEnabled;}
+}
+async function chooseImage(useEditedImage){
+  if(!state.selected)return;
+  try{
+    const ticker=state.selected.tickerSymbol;
+    const saved=await request(`/api/charts/${encodeURIComponent(ticker)}/image-choice`,{method:'PUT',body:JSON.stringify({useEditedImage})});
+    const index=state.charts.findIndex(c=>c.tickerSymbol===ticker);state.charts[index]=saved;state.selected=saved;renderForm();
+    showMessage(`${useEditedImage?'Edited candidate':'Original screenshot'} selected for publication.`,'success');
+  }catch(error){showMessage(error.message,'error');}
+}
+$('analyzeLines').onclick=()=>runAiAction('analyze',$('analyzeLines'),'Analyzing…');
+$('removeVideo').onclick=()=>runAiAction('remove-video',$('removeVideo'),'Editing…');
+$('showOriginal').onclick=()=>chooseImage(false);$('useEdited').onclick=()=>chooseImage(true);
+$('publish').onclick=async()=>{
+  const live=state.status.target==='live';
+  if(live&&!confirm('This will update the public Azure site. Continue?'))return;
+  showMessage(`Publishing approved charts to ${live?'the LIVE site':'local preview'}…`);
+  try{const result=await request('/api/publish',{method:'POST',body:JSON.stringify({confirmation:live?'PUBLISH LIVE':null})});showMessage(`Published ${result.tickers.length} chart(s) to ${live?'live Azure':'local preview'}.`,'success');await load();if(!live)window.open('/preview/','risk-reward-preview');}catch(error){showMessage(error.message,'error');}
+};
+load();
