@@ -34,7 +34,7 @@ public sealed class TwelveDataQuoteProvider : IQuoteProvider
             {
                 var node = chunk.Length == 1 ? document.RootElement : FindCaseInsensitive(document.RootElement, pair.Value);
                 if (node is { } value && value.TryGetProperty("price", out var priceNode) && decimal.TryParse(priceNode.GetString(), NumberStyles.Any, CultureInfo.InvariantCulture, out var price) && price > 0)
-                    result[pair.Key] = new Quote(pair.Key, price, DateTimeOffset.UtcNow, Name, Currency: SymbolCurrency(pair.Value));
+                    result[pair.Key] = new Quote(pair.Key, price, MarketSchedule.EffectiveQuoteTime(DateTimeOffset.UtcNow), Name, Currency: SymbolCurrency(pair.Value));
             }
             if (index < chunks.Count - 1) await Task.Delay(TimeSpan.FromSeconds(61), cancellationToken);
         }
@@ -69,19 +69,29 @@ public sealed class FinnhubQuoteProvider : IQuoteProvider
     {
         var result = new Dictionary<string, Quote>(StringComparer.OrdinalIgnoreCase);
         if (string.IsNullOrWhiteSpace(options.FinnhubApiKey)) return result;
+        var deadline = DateTimeOffset.UtcNow.AddSeconds(Math.Max(1, options.FinnhubCycleTimeoutSeconds));
         foreach (var pair in symbols)
         {
+            var remaining = deadline - DateTimeOffset.UtcNow;
+            if (remaining <= TimeSpan.Zero) break;
+            using var requestCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            requestCancellation.CancelAfter(remaining < TimeSpan.FromSeconds(options.RequestTimeoutSeconds)
+                ? remaining
+                : TimeSpan.FromSeconds(options.RequestTimeoutSeconds));
             try
             {
-                using var response = await http.GetAsync($"https://finnhub.io/api/v1/quote?symbol={Uri.EscapeDataString(pair.Value)}&token={Uri.EscapeDataString(options.FinnhubApiKey)}", cancellationToken);
+                using var response = await http.GetAsync($"https://finnhub.io/api/v1/quote?symbol={Uri.EscapeDataString(pair.Value)}&token={Uri.EscapeDataString(options.FinnhubApiKey)}", requestCancellation.Token);
                 response.EnsureSuccessStatusCode();
-                using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken));
+                using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync(requestCancellation.Token));
                 if (!document.RootElement.TryGetProperty("c", out var current) || current.GetDecimal() <= 0) continue;
                 var timestamp = document.RootElement.TryGetProperty("t", out var time) && time.TryGetInt64(out var unix) && unix > 0 ? DateTimeOffset.FromUnixTimeSeconds(unix) : DateTimeOffset.UtcNow;
                 result[pair.Key] = new Quote(pair.Key, current.GetDecimal(), timestamp, Name, Currency: SymbolCurrency(pair.Value));
             }
             catch (HttpRequestException) { /* Missing quotes are retried through the fallback provider. */ }
-            await Task.Delay(TimeSpan.FromMilliseconds(1050), cancellationToken);
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested) { /* Keep the whole provider pass bounded. */ }
+            remaining = deadline - DateTimeOffset.UtcNow;
+            if (remaining <= TimeSpan.Zero) break;
+            await Task.Delay(remaining < TimeSpan.FromMilliseconds(1050) ? remaining : TimeSpan.FromMilliseconds(1050), cancellationToken);
         }
         return result;
     }

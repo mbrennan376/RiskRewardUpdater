@@ -10,7 +10,9 @@ This solution contains a localhost chart-review site, shared chart/price infrast
    - Optionally ask OpenAI to remove the lower-left presenter video box. The generated candidate is never selected automatically; compare it with the original and explicitly choose which image to publish.
 3. Mark each screenshot ready or skipped, then publish. The default target is `C:\RiskReward\PreviewSite` and is available at `/preview/` from the admin app.
 4. Verify the complete static site locally.
-5. Set `RiskReward:AllowLivePublishing` to `true` and configure `RiskReward:AzureStorageConnectionString` with .NET user-secrets. The target switch defaults to Live Azure on startup and can be changed to Local Preview immediately, without confirmation gates. A completion message is shown after publishing succeeds.
+5. Configure `RiskReward:AzureStorageConnectionString` with .NET user-secrets. Live publishing is enabled by default; the target switch starts on Live Azure and can be changed to Local Preview immediately, without confirmation gates. A completion message is shown after publishing succeeds.
+
+The publisher can deploy the current static-site assets and chart catalog even when no screenshots changed. Use **Edit an unchanged chart** to reopen any published chart with its saved upper/lower boundaries, change its metadata, mark it ready, and republish it without replacing the screenshot.
 
 The shared deployment target is stored under `RiskReward:StateFolder`. The Windows Service reads that target before each update, so it also stays local until Live is deliberately enabled.
 
@@ -40,6 +42,12 @@ dotnet run --project src\RiskReward.PriceService -- --run-once
 ```
 
 The command honors the same guarded deployment target as the scheduled service. With the default Local target it writes `C:\RiskReward\PreviewSite\prices.json`, logs the primary/fallback provider results, and exits. It does not change the deployment target.
+
+The service writes a daily application log and `provider-summary-YYYY-MM-DD.csv` under `RiskReward:StateFolder\logs`. Provider rows use `SuccessCount,FailureCount,Provider,DateTime`. Each update cycle removes both managed log types when they are more than 30 days old. Finnhub passes are capped at 45 seconds before the remaining symbols fall back to the alternate provider.
+
+The normal final market-hours update begins at 4:00 PM Eastern. If it fails to publish fresh quotes for every chart, the service retries every five minutes through 4:30 PM; a service started during that recovery window attempts the missed close update immediately.
+
+Every Windows Service start performs an immediate price refresh regardless of market hours. Outside market hours, Twelve Data's timestamp-free price response is labeled with the most recent weekday 4:00 PM Eastern close so the static site does not represent a closing price as a live observation.
 
 `--run-once` explicitly loads the project's .NET user-secrets even when the console environment is Production. An installed Windows Service normally runs under a different Windows identity and should receive its keys through protected service configuration or environment variables instead of developer user-secrets.
 

@@ -1,4 +1,4 @@
-const state={status:null,charts:[],selected:null};
+const state={status:null,charts:[],published:[],selected:null};
 const $=id=>document.getElementById(id);
 
 async function request(url,options={}){
@@ -14,16 +14,27 @@ async function load(){
   showMessage('Scanning screenshot folder…');
   try{
     [state.status,state.charts]=await Promise.all([request('/api/status'),request('/api/charts/pending')]);
-    renderTarget();renderQueue();
+    state.published=await request('/api/charts/published');
+    renderTarget();renderQueue();renderExisting();
     if(state.selected){state.selected=state.charts.find(c=>c.tickerSymbol===state.selected.tickerSymbol)||state.charts[0];}
     else state.selected=state.charts[0];
     renderForm();showMessage(`${state.charts.length} changed screenshot${state.charts.length===1?'':'s'} found.`);
   }catch(error){showMessage(error.message,'error');}
 }
 
+function renderExisting(){
+  const active=new Set(state.charts.map(chart=>chart.tickerSymbol));
+  const available=state.published.filter(chart=>!active.has(chart.tickerSymbol));
+  const select=$('existingChart'),previous=select.value;
+  select.replaceChildren(...available.map(chart=>{const option=document.createElement('option');option.value=chart.tickerSymbol;option.textContent=`${chart.tickerSymbol} — ${chart.companyName}`;return option;}));
+  if(available.some(chart=>chart.tickerSymbol===previous))select.value=previous;
+  $('reopenChart').disabled=available.length===0;
+  if(available.length===0){const option=document.createElement('option');option.textContent='No additional published charts';option.value='';select.append(option);}
+}
+
 function renderTarget(){
   const live=state.status.target==='live';
-  $('targetSwitch').checked=live;$('targetSwitch').disabled=!state.status.allowLivePublishing&&live;
+  $('targetSwitch').checked=live;$('targetSwitch').disabled=false;
   $('targetBadge').textContent=live?'Live Azure':'Local Preview';$('targetBadge').className=`badge ${live?'live':'local'}`;
   $('publish').textContent=live?'Publish to LIVE site':'Publish to local preview';$('publish').disabled=live&&!state.status.allowLivePublishing;
 }
@@ -80,6 +91,15 @@ async function save(ready=false,skipped=false){
 
 $('reviewForm').addEventListener('submit',event=>{event.preventDefault();save(true,false);});
 $('save').onclick=()=>save(false,false);$('skip').onclick=()=>save(false,true);$('rescan').onclick=load;
+$('reopenChart').onclick=async()=>{
+  const ticker=$('existingChart').value;if(!ticker)return;
+  showMessage(`Opening ${ticker} for review…`);
+  try{
+    const draft=await request(`/api/charts/${encodeURIComponent(ticker)}/reopen`,{method:'POST'});
+    state.charts.push(draft);state.selected=draft;renderQueue();renderExisting();renderForm();
+    showMessage(`${ticker} opened with its currently published values. Update it and mark it ready to republish.`,'success');
+  }catch(error){showMessage(error.message,'error');}
+};
 function openPreview(){
   const url=state.status?.previewUrl||'/preview/';
   const separator=url.includes('?')?'&':'?';
@@ -119,6 +139,6 @@ $('showOriginal').onclick=()=>chooseImage(false);$('useEdited').onclick=()=>choo
 $('publish').onclick=async()=>{
   const live=state.status.target==='live',destination=live?'Live Azure':'the local preview';
   showMessage(`Publishing approved charts to ${destination}…`);
-  try{const result=await request('/api/publish',{method:'POST',body:'{}'});const confirmation=`Published ${result.tickers.length} chart(s) to ${destination}.`;showMessage(confirmation,'success');await load();if(!live)openPreview();alert(confirmation);}catch(error){showMessage(error.message,'error');}
+  try{const result=await request('/api/publish',{method:'POST',body:'{}'});const confirmation=result.tickers.length?`Published ${result.tickers.length} chart(s) to ${destination}.`:`Published the current site assets and chart catalog to ${destination}.`;await load();showMessage(confirmation,'success');if(!live)openPreview();alert(confirmation);}catch(error){showMessage(error.message,'error');}
 };
 load();

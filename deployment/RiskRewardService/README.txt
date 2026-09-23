@@ -25,6 +25,9 @@ Install
 The package copies the executable to:
   C:\Program Files\RiskRewardPriceService
 
+The packaged service is self-contained; .NET does not need to be installed
+separately on the server.
+
 Service state is stored at:
   C:\ProgramData\RiskReward
 
@@ -33,6 +36,29 @@ The service name is:
 
 Daily updater logs are written to:
   C:\ProgramData\RiskReward\logs\price-service-YYYY-MM-DD.log
+
+Daily provider monitoring summaries are written as CSV to:
+  C:\ProgramData\RiskReward\logs\provider-summary-YYYY-MM-DD.csv
+
+Both log types are automatically deleted after 30 days. Scheduled cycles now
+log when they start and finish. A Finnhub cycle is capped at 45 seconds so a
+failing provider cannot silently consume most of a 15-minute update interval.
+If the 4:00 PM update does not publish fresh prices for every chart, the service
+retries every five minutes through 4:30 PM. Starting the service during that
+window also triggers the missed final-close update immediately.
+Every service start also performs one immediate refresh regardless of the time.
+After-hours Twelve Data prices are timestamped at the latest weekday 4:00 PM
+close instead of being presented as live observations.
+
+Update an existing installation
+-------------------------------
+After replacing this package with a newer copy, double-click:
+  Update-RiskRewardService.cmd
+
+This stops the service, installs the new binaries, and restarts it without
+asking for or changing the credentials already stored for the service. Its
+complete output is saved beside the package as:
+  Update-RiskRewardService-last-run.log
 
 The service also reports errors to Windows Event Viewer under Windows Logs >
 Application. Provider request URLs are suppressed so API keys are not logged.

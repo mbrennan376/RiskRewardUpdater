@@ -50,6 +50,7 @@ public sealed class ChartDraft
     public Dictionary<string, string> ProviderSymbols { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public bool Ready { get; set; }
     public bool Skipped { get; set; }
+    public bool ManualReview { get; set; }
     public ChartAnalysis? Analysis { get; set; }
     public string? EditedImagePath { get; set; }
     public string? EditedImageHash { get; set; }

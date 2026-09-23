@@ -30,7 +30,6 @@ public sealed class SitePublisher
         if (blocking.Count > 0)
             throw new InvalidOperationException($"Review or skip every pending chart first: {string.Join(", ", blocking)}");
         var approved = state.Drafts.Values.Where(d => d.Ready && !d.Skipped).ToList();
-        if (approved.Count == 0) throw new InvalidOperationException("There are no approved charts to publish.");
         foreach (var draft in approved)
         {
             if (!File.Exists(draft.SourcePath) || await StateStore.HashFileAsync(draft.SourcePath, cancellationToken) != draft.ImageHash)

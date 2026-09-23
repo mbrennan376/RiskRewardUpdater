@@ -16,4 +16,33 @@ public sealed class MarketScheduleTests
         var value = new DateTimeOffset(year, month, day, hour, minute, 0, TimeSpan.FromHours(-4));
         Assert.Equal(expected, MarketSchedule.IsPollingSlot(value));
     }
+
+    [Theory]
+    [InlineData(2026, 9, 23, 16, 0, true)]
+    [InlineData(2026, 9, 23, 16, 25, true)]
+    [InlineData(2026, 9, 23, 16, 30, true)]
+    [InlineData(2026, 9, 23, 16, 31, false)]
+    [InlineData(2026, 9, 26, 16, 15, false)]
+    public void IdentifiesFinalCloseRetryWindow(int year, int month, int day, int hour, int minute, bool expected)
+    {
+        var value = new DateTimeOffset(year, month, day, hour, minute, 0, TimeSpan.FromHours(-4));
+        Assert.Equal(expected, MarketSchedule.IsFinalRetryWindow(value));
+    }
+
+    [Theory]
+    [InlineData("2026-09-23T20:40:00Z", "2026-09-23T16:00:00-04:00")]
+    [InlineData("2026-09-23T12:00:00Z", "2026-09-22T16:00:00-04:00")]
+    [InlineData("2026-09-26T15:00:00Z", "2026-09-25T16:00:00-04:00")]
+    public void UsesLatestWeekdayCloseOutsideMarketHours(string utcValue, string expected)
+    {
+        var actual = MarketSchedule.EffectiveQuoteTime(DateTimeOffset.Parse(utcValue));
+        Assert.Equal(DateTimeOffset.Parse(expected), actual);
+    }
+
+    [Fact]
+    public void UsesObservationTimeDuringMarketHours()
+    {
+        var observed = DateTimeOffset.Parse("2026-09-23T15:00:00Z");
+        Assert.Equal(observed, MarketSchedule.EffectiveQuoteTime(observed));
+    }
 }

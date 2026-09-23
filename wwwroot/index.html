@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Risk/Reward Publisher</title><link rel="stylesheet" href="admin.css"><link rel="stylesheet" href="ai-tools.css">
+  <title>Risk/Reward Publisher</title><link rel="stylesheet" href="admin.css"><link rel="stylesheet" href="ai-tools.css"><link rel="stylesheet" href="existing-charts.css">
 </head>
 <body>
   <header class="topbar">
@@ -15,6 +15,7 @@
       <button id="rescan" class="button secondary">Rescan folder</button><button id="publish" class="button accent">Publish to local preview</button>
     </section>
     <div id="message" class="message" role="status"></div>
+    <section class="existing-tools"><label for="existingChart">Edit an unchanged chart</label><select id="existingChart"></select><button id="reopenChart" class="button secondary">Open for review</button></section>
     <section id="empty" class="empty" hidden><h2>No changed screenshots</h2><p>The folder matches the last live publication.</p></section>
     <section id="workspace" class="workspace" hidden>
       <aside id="queue" class="queue"></aside>
@@ -38,6 +39,6 @@
       </article>
     </section>
   </main>
-  <script src="admin.js?v=20260923-4" defer></script>
+  <script src="admin.js?v=20260923-5" defer></script>
 </body>
 </html>

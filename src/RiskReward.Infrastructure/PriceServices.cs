@@ -9,12 +9,37 @@ namespace RiskReward.Infrastructure;
 
 public static class MarketSchedule
 {
+    private static readonly TimeZoneInfo Eastern = TimeZoneInfo.FindSystemTimeZoneById("Eastern Standard Time");
+
     public static bool IsPollingSlot(DateTimeOffset easternTime) =>
         easternTime.DayOfWeek is not DayOfWeek.Saturday and not DayOfWeek.Sunday &&
         easternTime.TimeOfDay >= new TimeSpan(9, 30, 0) && easternTime.TimeOfDay <= new TimeSpan(16, 0, 0) &&
         easternTime.Minute % 15 == 0;
 
     public static string SlotKey(DateTimeOffset easternTime) => easternTime.ToString("yyyy-MM-dd-HH-mm");
+
+    public static bool IsFinalRetryWindow(DateTimeOffset easternTime) =>
+        easternTime.DayOfWeek is not DayOfWeek.Saturday and not DayOfWeek.Sunday &&
+        easternTime.TimeOfDay >= new TimeSpan(16, 0, 0) && easternTime.TimeOfDay <= new TimeSpan(16, 30, 0);
+
+    public static DateTimeOffset EffectiveQuoteTime(DateTimeOffset utcNow)
+    {
+        var easternNow = TimeZoneInfo.ConvertTime(utcNow, Eastern);
+        var weekday = easternNow.DayOfWeek is not DayOfWeek.Saturday and not DayOfWeek.Sunday;
+        if (weekday && easternNow.TimeOfDay >= new TimeSpan(9, 30, 0) && easternNow.TimeOfDay < new TimeSpan(16, 0, 0))
+            return utcNow;
+
+        var closeDate = easternNow.Date;
+        if (!weekday || easternNow.TimeOfDay < new TimeSpan(16, 0, 0)) closeDate = closeDate.AddDays(-1);
+        while (closeDate.DayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday) closeDate = closeDate.AddDays(-1);
+        var localClose = DateTime.SpecifyKind(closeDate.AddHours(16), DateTimeKind.Unspecified);
+        return new DateTimeOffset(localClose, Eastern.GetUtcOffset(localClose));
+    }
+}
+
+public sealed record PriceUpdateResult(int FreshCount, int TotalCount, DeploymentTarget Target)
+{
+    public bool AllFresh => TotalCount > 0 && FreshCount == TotalCount;
 }
 
 public static class ChartCatalogReader
@@ -59,27 +84,31 @@ public sealed class PriceUpdateService
     private readonly RiskRewardOptions options;
     private readonly StateStore stateStore;
     private readonly ILogger<PriceUpdateService> logger;
+    private readonly ProviderRunCsvLogger providerRuns;
     private int nextProvider;
 
-    public PriceUpdateService(IEnumerable<IQuoteProvider> providers, IOptions<RiskRewardOptions> options, StateStore stateStore, ILogger<PriceUpdateService> logger)
+    public PriceUpdateService(IEnumerable<IQuoteProvider> providers, IOptions<RiskRewardOptions> options, StateStore stateStore, ILogger<PriceUpdateService> logger, ProviderRunCsvLogger providerRuns)
     {
         this.providers = providers.ToList();
         this.options = options.Value;
         this.stateStore = stateStore;
         this.logger = logger;
+        this.providerRuns = providerRuns;
     }
 
-    public async Task UpdateAsync(CancellationToken cancellationToken = default)
+    public async Task<PriceUpdateResult> UpdateAsync(CancellationToken cancellationToken = default)
     {
         if (providers.Count < 2) throw new InvalidOperationException("Configure two quote providers.");
+        try { providerRuns.DeleteLogsOlderThan(TimeSpan.FromDays(30)); }
+        catch (Exception ex) { logger.LogWarning(ex, "Old price-service logs could not be cleaned up."); }
         var target = await stateStore.GetTargetAsync(cancellationToken);
         if (target == DeploymentTarget.Live && !options.AllowLivePublishing)
         {
             logger.LogWarning("Live target was requested but live publishing is disabled; prices were not updated.");
-            return;
+            return new PriceUpdateResult(0, 0, target);
         }
         var catalog = await ReadCatalogAsync(target, cancellationToken);
-        if (catalog.Charts.Count == 0) { logger.LogInformation("No published charts were found."); return; }
+        if (catalog.Charts.Count == 0) { logger.LogInformation("No published charts were found."); return new PriceUpdateResult(0, 0, target); }
 
         var primary = providers[nextProvider++ % providers.Count];
         var fallback = providers[(nextProvider) % providers.Count];
@@ -93,6 +122,7 @@ public sealed class PriceUpdateService
             foreach (var pair in await GetQuotesSafelyAsync(fallback, BuildSymbols(fallbackCatalog, fallback.Name), cancellationToken)) quotes[pair.Key] = pair.Value;
         }
 
+        var freshCount = quotes.Count;
         var previous = await ReadPricesAsync(target, cancellationToken);
         foreach (var chart in catalog.Charts)
         {
@@ -100,7 +130,8 @@ public sealed class PriceUpdateService
             if (previous.Quotes.TryGetValue(chart.TickerSymbol, out var old)) quotes[chart.TickerSymbol] = old with { IsStale = true, Error = "Both quote providers failed." };
         }
         await WritePricesAsync(target, new PriceCatalog { GeneratedAt = DateTimeOffset.UtcNow, Quotes = quotes }, cancellationToken);
-        logger.LogInformation("Published {Count}/{Total} prices to {Target}; primary provider was {Provider}.", quotes.Count, catalog.Charts.Count, target, primary.Name);
+        logger.LogInformation("Published {Count}/{Total} prices to {Target}, including {FreshCount} fresh quotes; primary provider was {Provider}.", quotes.Count, catalog.Charts.Count, target, freshCount, primary.Name);
+        return new PriceUpdateResult(freshCount, catalog.Charts.Count, target);
     }
 
     private async Task<IReadOnlyDictionary<string, Quote>> GetQuotesSafelyAsync(
@@ -108,12 +139,22 @@ public sealed class PriceUpdateService
         IReadOnlyDictionary<string, string> symbols,
         CancellationToken cancellationToken)
     {
-        try { return await provider.GetQuotesAsync(symbols, cancellationToken); }
+        IReadOnlyDictionary<string, Quote> result = new Dictionary<string, Quote>(StringComparer.OrdinalIgnoreCase);
+        try
+        {
+            result = await provider.GetQuotesAsync(symbols, cancellationToken);
+            return result;
+        }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
         catch (Exception ex)
         {
             logger.LogWarning(ex, "Quote provider {Provider} failed; the next provider will be used for its missing symbols.", provider.Name);
-            return new Dictionary<string, Quote>(StringComparer.OrdinalIgnoreCase);
+            return result;
+        }
+        finally
+        {
+            try { providerRuns.Record(provider.Name, symbols.Count, result.Count); }
+            catch (Exception ex) { logger.LogWarning(ex, "The provider summary CSV could not be written."); }
         }
     }
 

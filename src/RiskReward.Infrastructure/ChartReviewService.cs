@@ -34,6 +34,12 @@ public sealed class ChartReviewService
             found.Add(ticker);
             if (state.Charts.TryGetValue(ticker, out var published) && published.ImageHash == hash)
             {
+                if (state.Drafts.TryGetValue(ticker, out var manualDraft) && manualDraft.ManualReview)
+                {
+                    manualDraft.SourcePath = path;
+                    manualDraft.SourceModifiedAt = File.GetLastWriteTimeUtc(path);
+                    continue;
+                }
                 state.Drafts.Remove(ticker);
                 continue;
             }
@@ -69,6 +75,42 @@ public sealed class ChartReviewService
 
         await store.SaveAsync(state, cancellationToken);
         return state.Drafts.Values.OrderByDescending(d => d.SourceModifiedAt).ThenBy(d => d.TickerSymbol).ToList();
+    }
+
+    public async Task<IReadOnlyList<RiskRewardChart>> PublishedAsync(CancellationToken cancellationToken = default)
+    {
+        var state = await store.LoadAsync(cancellationToken);
+        return state.Charts.Values.OrderBy(chart => chart.TickerSymbol).ToList();
+    }
+
+    public async Task<ChartDraft?> ReopenPublishedAsync(string ticker, CancellationToken cancellationToken = default)
+    {
+        ticker = ticker.Trim().ToUpperInvariant();
+        var state = await store.LoadAsync(cancellationToken);
+        if (state.Drafts.TryGetValue(ticker, out var existing)) return existing;
+        if (!state.Charts.TryGetValue(ticker, out var published)) return null;
+        var sourcePath = Directory.EnumerateFiles(options.ScreenshotFolder)
+            .Where(path => ImageExtensions.Contains(Path.GetExtension(path)))
+            .FirstOrDefault(path => Path.GetFileNameWithoutExtension(path).Equals(ticker, StringComparison.OrdinalIgnoreCase));
+        if (sourcePath is null) throw new InvalidOperationException($"The source screenshot for {ticker} was not found in {options.ScreenshotFolder}.");
+
+        var draft = new ChartDraft
+        {
+            TickerSymbol = published.TickerSymbol,
+            CompanyName = published.CompanyName,
+            SourcePath = sourcePath,
+            ImageHash = await StateStore.HashFileAsync(sourcePath, cancellationToken),
+            SourceModifiedAt = File.GetLastWriteTimeUtc(sourcePath),
+            UpperLine = published.UpperLine,
+            LowerLine = published.LowerLine,
+            Comments = published.Comments,
+            ProviderSymbols = new(published.ProviderSymbols, StringComparer.OrdinalIgnoreCase),
+            Analysis = published.Analysis,
+            ManualReview = true
+        };
+        state.Drafts[ticker] = draft;
+        await store.SaveAsync(state, cancellationToken);
+        return draft;
     }
 
     public async Task<ChartDraft?> SaveDraftAsync(string originalTicker, ChartDraft input, CancellationToken cancellationToken = default)

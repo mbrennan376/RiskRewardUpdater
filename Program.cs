@@ -71,6 +71,17 @@ app.MapPut("/api/target", async (TargetRequest request, StateStore store, Cancel
 });
 
 app.MapGet("/api/charts/pending", async (ChartReviewService review, CancellationToken cancellationToken) => Results.Ok(await review.ScanAsync(cancellationToken)));
+app.MapGet("/api/charts/published", async (ChartReviewService review, CancellationToken cancellationToken) => Results.Ok(await review.PublishedAsync(cancellationToken)));
+
+app.MapPost("/api/charts/{ticker}/reopen", async (string ticker, ChartReviewService review, CancellationToken cancellationToken) =>
+{
+    try
+    {
+        var draft = await review.ReopenPublishedAsync(ticker, cancellationToken);
+        return draft is null ? Results.NotFound() : Results.Ok(draft);
+    }
+    catch (InvalidOperationException ex) { return Results.BadRequest(new { error = ex.Message }); }
+});
 
 app.MapGet("/api/source-image/{ticker}", async (string ticker, StateStore store, CancellationToken cancellationToken) =>
 {
