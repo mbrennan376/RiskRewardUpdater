@@ -17,6 +17,42 @@ public static class MarketSchedule
     public static string SlotKey(DateTimeOffset easternTime) => easternTime.ToString("yyyy-MM-dd-HH-mm");
 }
 
+public static class ChartCatalogReader
+{
+    public static async Task<ChartCatalog> ReadAsync(Stream stream, CancellationToken cancellationToken = default)
+    {
+        using var document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+        if (document.RootElement.ValueKind == JsonValueKind.Object)
+            return document.RootElement.Deserialize<ChartCatalog>(JsonDefaults.Options) ?? new ChartCatalog();
+        if (document.RootElement.ValueKind != JsonValueKind.Array)
+            throw new JsonException("Chart data must be a catalog object or a legacy chart array.");
+
+        var catalog = new ChartCatalog();
+        foreach (var row in document.RootElement.EnumerateArray())
+        {
+            var ticker = Read(row, "tickerSymbol", "TickerSymbol", "Ticker Symbol").Trim().ToUpperInvariant();
+            if (string.IsNullOrWhiteSpace(ticker)) continue;
+            DateOnly.TryParse(Read(row, "updatedDate", "UpdatedDate", "Updated Date"), out var updated);
+            catalog.Charts.Add(new RiskRewardChart
+            {
+                TickerSymbol = ticker,
+                CompanyName = Read(row, "companyName", "CompanyName", "Company Name") is { Length: > 0 } company ? company : ticker,
+                UpdatedDate = updated,
+                ChartFilename = Read(row, "chartFilename", "ChartFilename", "Chart Filename"),
+                Comments = Read(row, "comments", "Comments")
+            });
+        }
+        return catalog;
+    }
+
+    private static string Read(JsonElement row, params string[] names)
+    {
+        foreach (var name in names)
+            if (row.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String) return value.GetString() ?? "";
+        return "";
+    }
+}
+
 public sealed class PriceUpdateService
 {
     private readonly IReadOnlyList<IQuoteProvider> providers;
@@ -93,11 +129,12 @@ public sealed class PriceUpdateService
             var path = Path.Combine(options.LocalSitePath, "data.json");
             if (!File.Exists(path)) return new ChartCatalog();
             await using var stream = File.OpenRead(path);
-            return await JsonSerializer.DeserializeAsync<ChartCatalog>(stream, JsonDefaults.Options, cancellationToken) ?? new ChartCatalog();
+            return await ChartCatalogReader.ReadAsync(stream, cancellationToken);
         }
         var blob = LiveContainer().GetBlobClient("data.json");
         var download = await blob.DownloadStreamingAsync(cancellationToken: cancellationToken);
-        return await JsonSerializer.DeserializeAsync<ChartCatalog>(download.Value.Content, JsonDefaults.Options, cancellationToken) ?? new ChartCatalog();
+        await using var content = download.Value.Content;
+        return await ChartCatalogReader.ReadAsync(content, cancellationToken);
     }
 
     private async Task<PriceCatalog> ReadPricesAsync(DeploymentTarget target, CancellationToken cancellationToken)

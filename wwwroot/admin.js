@@ -23,8 +23,9 @@ async function load(){
 
 function renderTarget(){
   const live=state.status.target==='live';
-  $('targetSwitch').checked=live;$('targetBadge').textContent=live?'Live Azure':'Local Preview';$('targetBadge').className=`badge ${live?'live':'local'}`;
-  $('publish').textContent=live?'Publish to LIVE site':'Publish to local preview';
+  $('targetSwitch').checked=live;$('targetSwitch').disabled=!state.status.allowLivePublishing&&live;
+  $('targetBadge').textContent=live?'Live Azure':'Local Preview';$('targetBadge').className=`badge ${live?'live':'local'}`;
+  $('publish').textContent=live?'Publish to LIVE site':'Publish to local preview';$('publish').disabled=live&&!state.status.allowLivePublishing;
 }
 
 function renderQueue(){
@@ -79,13 +80,19 @@ async function save(ready=false,skipped=false){
 
 $('reviewForm').addEventListener('submit',event=>{event.preventDefault();save(true,false);});
 $('save').onclick=()=>save(false,false);$('skip').onclick=()=>save(false,true);$('rescan').onclick=load;
-$('openPreview').onclick=()=>window.open('/preview/','risk-reward-preview');
+function openPreview(){
+  const url=state.status?.previewUrl||'/preview/';
+  const separator=url.includes('?')?'&':'?';
+  window.open(`${url}${separator}refresh=${Date.now()}`,'risk-reward-preview');
+}
+$('openPreview').onclick=openPreview;
 $('targetSwitch').addEventListener('change',async event=>{
-  if(event.target.checked){event.target.checked=false;if(!state.status.allowLivePublishing){showMessage('Live publishing is disabled. Set RiskReward:AllowLivePublishing to true when production is ready.','error');return;}$('liveConfirmation').value='';$('liveDialog').showModal();}
-  else await setTarget('local');
+  const target=event.target.checked?'live':'local';
+  try{
+    const result=await request('/api/target',{method:'PUT',body:JSON.stringify({target})});
+    state.status.target=result.target;renderTarget();showMessage(`Publishing target changed to ${target==='live'?'Live Azure':'local preview'}.`,'success');
+  }catch(error){renderTarget();showMessage(error.message,'error');}
 });
-$('confirmLive').onclick=async event=>{event.preventDefault();await setTarget('live',$('liveConfirmation').value);if(state.status.target==='live')$('liveDialog').close();};
-async function setTarget(target,confirmation=null){try{await request('/api/target',{method:'PUT',body:JSON.stringify({target,confirmation})});state.status.target=target;renderTarget();showMessage(`Deployment target changed to ${target}.`,'success');}catch(error){renderTarget();showMessage(error.message,'error');}}
 async function runAiAction(action,button,busyText){
   if(!state.selected)return;
   const ticker=state.selected.tickerSymbol;button.disabled=true;const previous=button.textContent;button.textContent=busyText;
@@ -110,9 +117,8 @@ $('analyzeLines').onclick=()=>runAiAction('analyze',$('analyzeLines'),'Analyzing
 $('removeVideo').onclick=()=>runAiAction('remove-video',$('removeVideo'),'Editing…');
 $('showOriginal').onclick=()=>chooseImage(false);$('useEdited').onclick=()=>chooseImage(true);
 $('publish').onclick=async()=>{
-  const live=state.status.target==='live';
-  if(live&&!confirm('This will update the public Azure site. Continue?'))return;
-  showMessage(`Publishing approved charts to ${live?'the LIVE site':'local preview'}…`);
-  try{const result=await request('/api/publish',{method:'POST',body:JSON.stringify({confirmation:live?'PUBLISH LIVE':null})});showMessage(`Published ${result.tickers.length} chart(s) to ${live?'live Azure':'local preview'}.`,'success');await load();if(!live)window.open('/preview/','risk-reward-preview');}catch(error){showMessage(error.message,'error');}
+  const live=state.status.target==='live',destination=live?'Live Azure':'the local preview';
+  showMessage(`Publishing approved charts to ${destination}…`);
+  try{const result=await request('/api/publish',{method:'POST',body:'{}'});const confirmation=`Published ${result.tickers.length} chart(s) to ${destination}.`;showMessage(confirmation,'success');await load();if(!live)openPreview();alert(confirmation);}catch(error){showMessage(error.message,'error');}
 };
 load();

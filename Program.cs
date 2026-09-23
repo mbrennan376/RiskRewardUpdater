@@ -21,15 +21,39 @@ var app = builder.Build();
 var configured = app.Services.GetRequiredService<IOptions<RiskRewardOptions>>().Value;
 var openAiConfigured = app.Services.GetRequiredService<IOptions<OpenAiOptions>>().Value;
 Directory.CreateDirectory(configured.LocalSitePath);
+if (configured.AllowLivePublishing)
+    await app.Services.GetRequiredService<StateStore>().SetTargetAsync(DeploymentTarget.Live);
 
 app.UseDefaultFiles();
 app.UseStaticFiles();
-app.UseFileServer(new FileServerOptions
+app.Map("/preview", preview =>
 {
-    RequestPath = "/preview",
-    FileProvider = new PhysicalFileProvider(configured.LocalSitePath),
-    EnableDefaultFiles = true,
-    EnableDirectoryBrowsing = false
+    preview.Use(async (context, next) =>
+    {
+        if (!context.Request.Path.HasValue || context.Request.Path == "/")
+        {
+            var indexPath = Path.Combine(configured.LocalSitePath, "index.html");
+            if (!File.Exists(indexPath))
+            {
+                context.Response.StatusCode = StatusCodes.Status404NotFound;
+                await context.Response.WriteAsync("Publish the local preview before opening it.");
+                return;
+            }
+            context.Response.ContentType = "text/html; charset=utf-8";
+            await context.Response.SendFileAsync(indexPath);
+            return;
+        }
+        await next();
+    });
+    preview.UseStaticFiles(new StaticFileOptions
+    {
+        FileProvider = new PhysicalFileProvider(configured.LocalSitePath)
+    });
+    preview.Run(async context =>
+    {
+        context.Response.StatusCode = StatusCodes.Status404NotFound;
+        await context.Response.WriteAsync("The requested local-preview asset does not exist.");
+    });
 });
 
 app.MapGet("/api/status", async (StateStore store, CancellationToken cancellationToken) =>
@@ -40,11 +64,8 @@ app.MapGet("/api/status", async (StateStore store, CancellationToken cancellatio
 
 app.MapPut("/api/target", async (TargetRequest request, StateStore store, CancellationToken cancellationToken) =>
 {
-    if (request.Target == DeploymentTarget.Live)
-    {
-        if (!configured.AllowLivePublishing) return Results.BadRequest(new { error = "Live publishing is disabled in appsettings.json." });
-        if (request.Confirmation != "PUBLISH LIVE") return Results.BadRequest(new { error = "Enter PUBLISH LIVE to enable live mode." });
-    }
+    if (request.Target == DeploymentTarget.Live && !configured.AllowLivePublishing)
+        return Results.BadRequest(new { error = "Live publishing is disabled. Set RiskReward:AllowLivePublishing to true." });
     await store.SetTargetAsync(request.Target, cancellationToken);
     return Results.Ok(new { target = request.Target });
 });
@@ -112,12 +133,12 @@ app.MapPut("/api/charts/{ticker}/image-choice", async (string ticker, ImageChoic
     catch (InvalidOperationException ex) { return Results.BadRequest(new { error = ex.Message }); }
 });
 
-app.MapPost("/api/publish", async (PublishRequest request, StateStore store, SitePublisher publisher, CancellationToken cancellationToken) =>
+app.MapPost("/api/publish", async (StateStore store, SitePublisher publisher, CancellationToken cancellationToken) =>
 {
     try
     {
         var target = await store.GetTargetAsync(cancellationToken);
-        return Results.Ok(await publisher.PublishApprovedAsync(target, request.Confirmation, cancellationToken));
+        return Results.Ok(await publisher.PublishApprovedAsync(target, cancellationToken));
     }
     catch (Exception ex) when (ex is InvalidOperationException or DirectoryNotFoundException)
     {
@@ -128,6 +149,5 @@ app.MapPost("/api/publish", async (PublishRequest request, StateStore store, Sit
 app.MapFallbackToFile("index.html");
 app.Run();
 
-public sealed record TargetRequest(DeploymentTarget Target, string? Confirmation);
-public sealed record PublishRequest(string? Confirmation);
+public sealed record TargetRequest(DeploymentTarget Target);
 public sealed record ImageChoiceRequest(bool UseEditedImage);

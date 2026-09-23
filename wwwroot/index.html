@@ -7,7 +7,7 @@
 <body>
   <header class="topbar">
     <div><span class="eyebrow">LOCAL PUBLISHER</span><h1>Chart review</h1></div>
-    <div class="target-panel"><span id="targetBadge" class="badge local">Local Preview</span><label class="switch"><input id="targetSwitch" type="checkbox"><span></span></label><button id="openPreview" class="button secondary">Open preview</button></div>
+    <div class="target-panel"><span id="targetBadge" class="badge live">Live Azure</span><label class="switch" title="Toggle between Live Azure and local preview"><input id="targetSwitch" type="checkbox" checked><span></span></label><button id="openPreview" class="button secondary">Open local preview</button></div>
   </header>
   <main>
     <section class="summary-card">
@@ -38,7 +38,6 @@
       </article>
     </section>
   </main>
-  <dialog id="liveDialog"><form method="dialog"><span class="eyebrow danger">LIVE SITE</span><h2>Enable live publishing?</h2><p>The price service and chart publisher will use Azure on their next run.</p><label>Type <strong>PUBLISH LIVE</strong><input id="liveConfirmation" autocomplete="off"></label><div class="actions"><button value="cancel" class="button secondary">Cancel</button><button id="confirmLive" value="default" class="button danger-button">Enable live</button></div></form></dialog>
-  <script src="admin.js" defer></script>
+  <script src="admin.js?v=20260923-4" defer></script>
 </body>
 </html>

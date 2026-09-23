@@ -17,14 +17,12 @@ public sealed class SitePublisher
         this.store = store;
     }
 
-    public async Task<PublicationRecord> PublishApprovedAsync(DeploymentTarget target, string? confirmation, CancellationToken cancellationToken = default)
+    public async Task<PublicationRecord> PublishApprovedAsync(DeploymentTarget target, CancellationToken cancellationToken = default)
     {
         if (target == DeploymentTarget.Live)
         {
             if (!options.AllowLivePublishing)
                 throw new InvalidOperationException("Live publishing is disabled in configuration.");
-            if (!string.Equals(confirmation, "PUBLISH LIVE", StringComparison.Ordinal))
-                throw new InvalidOperationException("Live publishing requires the confirmation phrase PUBLISH LIVE.");
         }
 
         var state = await store.LoadAsync(cancellationToken);

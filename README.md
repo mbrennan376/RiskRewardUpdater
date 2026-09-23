@@ -10,7 +10,7 @@ This solution contains a localhost chart-review site, shared chart/price infrast
    - Optionally ask OpenAI to remove the lower-left presenter video box. The generated candidate is never selected automatically; compare it with the original and explicitly choose which image to publish.
 3. Mark each screenshot ready or skipped, then publish. The default target is `C:\RiskReward\PreviewSite` and is available at `/preview/` from the admin app.
 4. Verify the complete static site locally.
-5. When production is ready, set `RiskReward:AllowLivePublishing` to `true`, configure `RiskReward:AzureStorageConnectionString` with .NET user-secrets or an environment variable, restart, and use the guarded Live switch. Live mode requires the phrase `PUBLISH LIVE`.
+5. Set `RiskReward:AllowLivePublishing` to `true` and configure `RiskReward:AzureStorageConnectionString` with .NET user-secrets. The target switch defaults to Live Azure on startup and can be changed to Local Preview immediately, without confirmation gates. A completion message is shown after publishing succeeds.
 
 The shared deployment target is stored under `RiskReward:StateFolder`. The Windows Service reads that target before each update, so it also stays local until Live is deliberately enabled.
 
@@ -32,6 +32,16 @@ The OpenAI actions are entirely optional and disabled until an API key is config
 ## Price service
 
 The service alternates Twelve Data and Finnhub every 15-minute polling cycle, falling back per missing symbol. It runs on weekdays from 9:30 a.m. through 4:00 p.m. Eastern. Provider-specific Canadian/OTC symbols can be entered during chart review.
+
+To exercise the complete pipeline immediately without installing the Windows Service or waiting for a quarter-hour slot, run:
+
+```powershell
+dotnet run --project src\RiskReward.PriceService -- --run-once
+```
+
+The command honors the same guarded deployment target as the scheduled service. With the default Local target it writes `C:\RiskReward\PreviewSite\prices.json`, logs the primary/fallback provider results, and exits. It does not change the deployment target.
+
+`--run-once` explicitly loads the project's .NET user-secrets even when the console environment is Production. An installed Windows Service normally runs under a different Windows identity and should receive its keys through protected service configuration or environment variables instead of developer user-secrets.
 
 Install from an elevated PowerShell session with `scripts\install-price-service.ps1`. Remove it with `scripts\uninstall-price-service.ps1`.
 
