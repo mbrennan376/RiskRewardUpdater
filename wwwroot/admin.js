@@ -33,7 +33,7 @@ function renderExisting(){
 }
 
 function renderTarget(){
-  const live=state.status.target==='live';
+  const live=String(state.status.target).toLowerCase()==='live';
   $('targetSwitch').checked=live;$('targetSwitch').disabled=false;
   $('targetBadge').textContent=live?'Live Azure':'Local Preview';$('targetBadge').className=`badge ${live?'live':'local'}`;
   $('publish').textContent=live?'Publish to LIVE site':'Publish to local preview';$('publish').disabled=live&&!state.status.allowLivePublishing;
@@ -110,7 +110,7 @@ $('targetSwitch').addEventListener('change',async event=>{
   const target=event.target.checked?'live':'local';
   try{
     const result=await request('/api/target',{method:'PUT',body:JSON.stringify({target})});
-    state.status.target=result.target;renderTarget();showMessage(`Publishing target changed to ${target==='live'?'Live Azure':'local preview'}.`,'success');
+    state.status.target=String(result.target).toLowerCase();renderTarget();showMessage(`Publishing target changed to ${target==='live'?'Live Azure':'local preview'}.`,'success');
   }catch(error){renderTarget();showMessage(error.message,'error');}
 });
 async function runAiAction(action,button,busyText){
@@ -137,7 +137,7 @@ $('analyzeLines').onclick=()=>runAiAction('analyze',$('analyzeLines'),'Analyzing
 $('removeVideo').onclick=()=>runAiAction('remove-video',$('removeVideo'),'Editing…');
 $('showOriginal').onclick=()=>chooseImage(false);$('useEdited').onclick=()=>chooseImage(true);
 $('publish').onclick=async()=>{
-  const live=state.status.target==='live',destination=live?'Live Azure':'the local preview';
+  const live=String(state.status.target).toLowerCase()==='live',destination=live?'Live Azure':'the local preview';
   showMessage(`Publishing approved charts to ${destination}…`);
   try{const result=await request('/api/publish',{method:'POST',body:'{}'});const confirmation=result.tickers.length?`Published ${result.tickers.length} chart(s) to ${destination}.`:`Published the current site assets and chart catalog to ${destination}.`;await load();showMessage(confirmation,'success');if(!live)openPreview();alert(confirmation);}catch(error){showMessage(error.message,'error');}
 };
