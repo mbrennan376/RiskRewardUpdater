@@ -66,6 +66,9 @@ artifacts/
 # Generated self-contained Windows Service deployment binaries.
 deployment/RiskRewardService/service/
 
+# Generated HomeSeer plugin deployment binaries.
+deployment/RiskRewardMonitor/package/
+
 # ASP.NET Scaffolding
 ScaffoldingReadMe.txt
 

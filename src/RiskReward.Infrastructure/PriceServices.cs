@@ -27,7 +27,14 @@ public static class MarketSchedule
         var easternNow = TimeZoneInfo.ConvertTime(utcNow, Eastern);
         var weekday = easternNow.DayOfWeek is not DayOfWeek.Saturday and not DayOfWeek.Sunday;
         if (weekday && easternNow.TimeOfDay >= new TimeSpan(9, 30, 0) && easternNow.TimeOfDay < new TimeSpan(16, 0, 0))
-            return utcNow;
+        {
+            // Twelve Data's lightweight price endpoint has no observation timestamp. Use the
+            // current scheduler slot so all chunks in one pass share a stable, repeatable time.
+            var slotMinute = easternNow.Minute - easternNow.Minute % 15;
+            var localSlot = new DateTime(easternNow.Year, easternNow.Month, easternNow.Day,
+                easternNow.Hour, slotMinute, 0, DateTimeKind.Unspecified);
+            return new DateTimeOffset(localSlot, Eastern.GetUtcOffset(localSlot));
+        }
 
         var closeDate = easternNow.Date;
         if (!weekday || easternNow.TimeOfDay < new TimeSpan(16, 0, 0)) closeDate = closeDate.AddDays(-1);
@@ -85,15 +92,17 @@ public sealed class PriceUpdateService
     private readonly StateStore stateStore;
     private readonly ILogger<PriceUpdateService> logger;
     private readonly ProviderRunCsvLogger providerRuns;
+    private readonly PriceHistoryStore history;
     private int nextProvider;
 
-    public PriceUpdateService(IEnumerable<IQuoteProvider> providers, IOptions<RiskRewardOptions> options, StateStore stateStore, ILogger<PriceUpdateService> logger, ProviderRunCsvLogger providerRuns)
+    public PriceUpdateService(IEnumerable<IQuoteProvider> providers, IOptions<RiskRewardOptions> options, StateStore stateStore, ILogger<PriceUpdateService> logger, ProviderRunCsvLogger providerRuns, PriceHistoryStore history)
     {
         this.providers = providers.ToList();
         this.options = options.Value;
         this.stateStore = stateStore;
         this.logger = logger;
         this.providerRuns = providerRuns;
+        this.history = history;
     }
 
     public async Task<PriceUpdateResult> UpdateAsync(CancellationToken cancellationToken = default)
@@ -122,7 +131,8 @@ public sealed class PriceUpdateService
             foreach (var pair in await GetQuotesSafelyAsync(fallback, BuildSymbols(fallbackCatalog, fallback.Name), cancellationToken)) quotes[pair.Key] = pair.Value;
         }
 
-        var freshCount = quotes.Count;
+        var freshQuotes = new Dictionary<string, Quote>(quotes, StringComparer.OrdinalIgnoreCase);
+        var freshCount = freshQuotes.Count;
         var previous = await ReadPricesAsync(target, cancellationToken);
         foreach (var chart in catalog.Charts)
         {
@@ -130,6 +140,9 @@ public sealed class PriceUpdateService
             if (previous.Quotes.TryGetValue(chart.TickerSymbol, out var old)) quotes[chart.TickerSymbol] = old with { IsStale = true, Error = "Both quote providers failed." };
         }
         await WritePricesAsync(target, new PriceCatalog { GeneratedAt = DateTimeOffset.UtcNow, Quotes = quotes }, cancellationToken);
+        try { await history.UpdateAsync(target, catalog, freshQuotes, cancellationToken); }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+        catch (Exception ex) { logger.LogError(ex, "Current prices were published, but the history update failed and will be retried on a later run."); }
         logger.LogInformation("Published {Count}/{Total} prices to {Target}, including {FreshCount} fresh quotes; primary provider was {Provider}.", quotes.Count, catalog.Charts.Count, target, freshCount, primary.Name);
         return new PriceUpdateResult(freshCount, catalog.Charts.Count, target);
     }
@@ -160,7 +173,14 @@ public sealed class PriceUpdateService
 
     private static Dictionary<string, string> BuildSymbols(ChartCatalog catalog, string provider) => catalog.Charts.ToDictionary(
         chart => chart.TickerSymbol,
-        chart => chart.ProviderSymbols.TryGetValue(provider, out var mapped) && !string.IsNullOrWhiteSpace(mapped) ? mapped : chart.TickerSymbol,
+        chart =>
+        {
+            var currency = MarketMetadata.NormalizeCurrency(chart.Currency, chart.TickerSymbol);
+            if (chart.CurrencyProviderSymbols.TryGetValue(currency, out var currencySymbols) &&
+                currencySymbols.TryGetValue(provider, out var currencyMapped) && !string.IsNullOrWhiteSpace(currencyMapped)) return currencyMapped;
+            if (chart.ProviderSymbols.TryGetValue(provider, out var mapped) && !string.IsNullOrWhiteSpace(mapped)) return mapped;
+            return MarketMetadata.ActiveSymbol(chart);
+        },
         StringComparer.OrdinalIgnoreCase);
 
     private async Task<ChartCatalog> ReadCatalogAsync(DeploymentTarget target, CancellationToken cancellationToken)

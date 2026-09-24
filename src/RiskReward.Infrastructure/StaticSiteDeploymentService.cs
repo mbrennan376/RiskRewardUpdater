@@ -23,6 +23,7 @@ public sealed class StaticSiteDeploymentService(IOptions<RiskRewardOptions> conf
             // Catalog, quote, and chart content are managed by the review and price workflows.
             if (relative.Equals("data.json", StringComparison.OrdinalIgnoreCase) ||
                 relative.Equals("prices.json", StringComparison.OrdinalIgnoreCase) ||
+                relative.StartsWith("history/", StringComparison.OrdinalIgnoreCase) ||
                 relative.StartsWith("charts/", StringComparison.OrdinalIgnoreCase)) continue;
 
             await container.GetBlobClient(relative).UploadAsync(file, new BlobUploadOptions

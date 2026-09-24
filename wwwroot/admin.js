@@ -56,8 +56,12 @@ function renderQueue(){
 function renderForm(){
   const chart=state.selected;if(!chart)return;
   $('formTicker').textContent=chart.tickerSymbol;$('ticker').value=chart.tickerSymbol;$('company').value=chart.companyName;
+  const currency=normalizeCurrency(chart.currency,chart.tickerSymbol);chart.currency=currency;
+  chart.currencyTickerSymbols=chart.currencyTickerSymbols||{};if(!chart.currencyTickerSymbols[currency])chart.currencyTickerSymbols[currency]=chart.tickerSymbol;
+  chart.currencyProviderSymbols=chart.currencyProviderSymbols||{};
+  $('chartCurrency').value=currency;$('exchange').value=chart.exchange??'';$('usdTicker').value=chart.currencyTickerSymbols.USD??'';$('cadTicker').value=chart.currencyTickerSymbols.CAD??'';
   $('upperLine').value=chart.upperLine??'';$('lowerLine').value=chart.lowerLine??'';$('comments').value=chart.comments??'';
-  $('twelveSymbol').value=chart.providerSymbols?.twelveData??'';$('finnhubSymbol').value=chart.providerSymbols?.finnhub??'';
+  loadProviderSymbols(chart,currency);$('currencyNote').textContent='Changing currency converts both chart boundaries using the latest Bank of Canada daily reference rate.';
   const imageEndpoint=chart.useEditedImage&&chart.editedImagePath?'edited-image':'source-image';
   $('chartImage').src=`/api/${imageEndpoint}/${encodeURIComponent(chart.tickerSymbol)}?h=${imageEndpoint==='edited-image'?chart.editedImageHash:chart.imageHash}`;
   $('analyzeLines').disabled=!state.status.openAiEnabled;$('removeVideo').disabled=!state.status.openAiEnabled;
@@ -78,8 +82,32 @@ function renderForm(){
 
 function formValue(ready=false,skipped=false){
   const number=id=>$(id).value===''?null:Number($(id).value);
-  return {...state.selected,tickerSymbol:$('ticker').value.trim().toUpperCase(),companyName:$('company').value.trim(),upperLine:number('upperLine'),lowerLine:number('lowerLine'),comments:$('comments').value.trim(),providerSymbols:{twelveData:$('twelveSymbol').value.trim(),finnhub:$('finnhubSymbol').value.trim()},ready,skipped};
+  const currency=$('chartCurrency').value;stashProviderSymbols(state.selected,currency);
+  const currencyTickerSymbols={...(state.selected.currencyTickerSymbols||{}),USD:$('usdTicker').value.trim().toUpperCase(),CAD:$('cadTicker').value.trim().toUpperCase()};
+  const providerSymbols=state.selected.currencyProviderSymbols?.[currency]||{};
+  return {...state.selected,tickerSymbol:$('ticker').value.trim().toUpperCase(),companyName:$('company').value.trim(),currency,exchange:$('exchange').value.trim().toUpperCase()||null,currencyTickerSymbols,upperLine:number('upperLine'),lowerLine:number('lowerLine'),comments:$('comments').value.trim(),providerSymbols,currencyProviderSymbols:state.selected.currencyProviderSymbols,ready,skipped};
 }
+
+function normalizeCurrency(value,ticker){const normalized=String(value||'').toUpperCase();if(normalized==='CAD'||normalized==='USD')return normalized;return /\.(V|TO)$/i.test(ticker)?'CAD':'USD';}
+function stashProviderSymbols(chart,currency){chart.currencyProviderSymbols=chart.currencyProviderSymbols||{};chart.currencyProviderSymbols[currency]={twelveData:$('twelveSymbol').value.trim(),finnhub:$('finnhubSymbol').value.trim()};}
+function loadProviderSymbols(chart,currency){const mapped=chart.currencyProviderSymbols?.[currency]||(normalizeCurrency(chart.currency,chart.tickerSymbol)===currency?chart.providerSymbols:null)||{};$('twelveSymbol').value=mapped.twelveData??'';$('finnhubSymbol').value=mapped.finnhub??'';}
+function converted(value,rate){if(value==='')return '';const result=Number(value)*Number(rate);return Number.isFinite(result)?String(Number(result.toFixed(6))):value;}
+
+$('chartCurrency').addEventListener('change',async event=>{
+  const chart=state.selected;if(!chart)return;
+  const from=normalizeCurrency(chart.currency,chart.tickerSymbol),to=event.target.value;
+  stashProviderSymbols(chart,from);chart.currencyTickerSymbols={...(chart.currencyTickerSymbols||{}),USD:$('usdTicker').value.trim().toUpperCase(),CAD:$('cadTicker').value.trim().toUpperCase()};
+  if(from===to){loadProviderSymbols(chart,to);return;}
+  event.target.disabled=true;$('currencyNote').textContent=`Converting ${from} to ${to}…`;
+  try{
+    const rate=await request(`/api/fx?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
+    $('upperLine').value=converted($('upperLine').value,rate.rate);$('lowerLine').value=converted($('lowerLine').value,rate.rate);
+    chart.currency=to;loadProviderSymbols(chart,to);
+    $('currencyNote').textContent=`Converted at 1 ${from} = ${Number(rate.rate).toFixed(6)} ${to} · ${rate.provider} · ${rate.effectiveDate}. Review before saving.`;
+    showMessage(`Chart currency changed to ${to}; both boundaries were converted.`,'success');
+  }catch(error){event.target.value=from;$('currencyNote').textContent='Currency conversion failed; the boundaries were not changed.';showMessage(error.message,'error');}
+  finally{event.target.disabled=false;}
+});
 
 async function save(ready=false,skipped=false){
   const original=state.selected.tickerSymbol;$('saveState').textContent='Saving…';

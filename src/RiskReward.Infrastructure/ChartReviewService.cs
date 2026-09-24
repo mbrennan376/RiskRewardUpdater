@@ -56,11 +56,16 @@ public sealed class ChartReviewService
                     SourceModifiedAt = File.GetLastWriteTimeUtc(path),
                     UpperLine = previousDraft?.UpperLine ?? published?.UpperLine,
                     LowerLine = previousDraft?.LowerLine ?? published?.LowerLine,
+                    Currency = MarketMetadata.NormalizeCurrency(previousDraft?.Currency ?? published?.Currency, ticker),
+                    Exchange = previousDraft?.Exchange ?? published?.Exchange,
+                    CurrencyTickerSymbols = Copy(previousDraft?.CurrencyTickerSymbols ?? published?.CurrencyTickerSymbols),
                     Comments = previousDraft?.Comments ?? published?.Comments ?? "",
                     ProviderSymbols = (previousDraft?.ProviderSymbols ?? published?.ProviderSymbols) is not { } symbols
                         ? new(StringComparer.OrdinalIgnoreCase)
-                        : new(symbols, StringComparer.OrdinalIgnoreCase)
+                        : new(symbols, StringComparer.OrdinalIgnoreCase),
+                    CurrencyProviderSymbols = CopyNested(previousDraft?.CurrencyProviderSymbols ?? published?.CurrencyProviderSymbols)
                 };
+                if (!draft.CurrencyTickerSymbols.ContainsKey(draft.Currency)) draft.CurrencyTickerSymbols[draft.Currency] = ticker;
                 state.Drafts[ticker] = draft;
             }
             else
@@ -103,8 +108,12 @@ public sealed class ChartReviewService
             SourceModifiedAt = File.GetLastWriteTimeUtc(sourcePath),
             UpperLine = published.UpperLine,
             LowerLine = published.LowerLine,
+            Currency = MarketMetadata.NormalizeCurrency(published.Currency, published.TickerSymbol),
+            Exchange = published.Exchange,
+            CurrencyTickerSymbols = Copy(published.CurrencyTickerSymbols),
             Comments = published.Comments,
             ProviderSymbols = new(published.ProviderSymbols, StringComparer.OrdinalIgnoreCase),
+            CurrencyProviderSymbols = CopyNested(published.CurrencyProviderSymbols),
             Analysis = published.Analysis,
             ManualReview = true
         };
@@ -126,10 +135,21 @@ public sealed class ChartReviewService
         existing.CompanyName = string.IsNullOrWhiteSpace(input.CompanyName) ? ticker : input.CompanyName.Trim();
         existing.LowerLine = input.LowerLine;
         existing.UpperLine = input.UpperLine;
+        existing.Currency = MarketMetadata.NormalizeCurrency(input.Currency, ticker);
+        existing.Exchange = string.IsNullOrWhiteSpace(input.Exchange) ? null : input.Exchange.Trim().ToUpperInvariant();
+        existing.CurrencyTickerSymbols = Copy(input.CurrencyTickerSymbols)
+            .Where(pair => !string.IsNullOrWhiteSpace(pair.Value))
+            .ToDictionary(pair => pair.Key.ToUpperInvariant(), pair => pair.Value.Trim().ToUpperInvariant(), StringComparer.OrdinalIgnoreCase);
+        if (!existing.CurrencyTickerSymbols.ContainsKey(existing.Currency)) existing.CurrencyTickerSymbols[existing.Currency] = ticker;
         existing.Comments = input.Comments?.Trim() ?? "";
-        existing.ProviderSymbols = input.ProviderSymbols
+        existing.ProviderSymbols = (input.ProviderSymbols ?? new())
             .Where(pair => !string.IsNullOrWhiteSpace(pair.Value))
             .ToDictionary(pair => pair.Key, pair => pair.Value.Trim(), StringComparer.OrdinalIgnoreCase);
+        existing.CurrencyProviderSymbols = CopyNested(input.CurrencyProviderSymbols);
+        foreach (var currency in existing.CurrencyProviderSymbols.Keys.ToList())
+            existing.CurrencyProviderSymbols[currency] = existing.CurrencyProviderSymbols[currency]
+                .Where(pair => !string.IsNullOrWhiteSpace(pair.Value))
+                .ToDictionary(pair => pair.Key, pair => pair.Value.Trim(), StringComparer.OrdinalIgnoreCase);
         existing.Ready = input.Ready;
         existing.Skipped = input.Skipped;
         if (!ticker.Equals(originalTicker, StringComparison.OrdinalIgnoreCase))
@@ -216,4 +236,11 @@ public sealed class ChartReviewService
             if (row.TryGetProperty(name, out var value)) return value.GetString() ?? "";
         return "";
     }
+
+    private static Dictionary<string, string> Copy(Dictionary<string, string>? source) =>
+        source is null ? new(StringComparer.OrdinalIgnoreCase) : new(source, StringComparer.OrdinalIgnoreCase);
+
+    private static Dictionary<string, Dictionary<string, string>> CopyNested(Dictionary<string, Dictionary<string, string>>? source) =>
+        source?.ToDictionary(pair => pair.Key.ToUpperInvariant(), pair => new Dictionary<string, string>(pair.Value, StringComparer.OrdinalIgnoreCase), StringComparer.OrdinalIgnoreCase)
+        ?? new(StringComparer.OrdinalIgnoreCase);
 }

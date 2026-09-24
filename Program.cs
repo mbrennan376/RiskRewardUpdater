@@ -14,6 +14,7 @@ builder.Services.AddSingleton<ChartReviewService>();
 builder.Services.AddSingleton<SitePublisher>();
 builder.Services.AddHttpClient<OpenAiChartAnalyzer>();
 builder.Services.AddHttpClient<OpenAiChartImageEditor>();
+builder.Services.AddHttpClient<CurrencyConversionService>();
 builder.Services.AddSingleton<IChartAnalyzer>(services => services.GetRequiredService<OpenAiChartAnalyzer>());
 builder.Services.AddSingleton<IChartImageEditor>(services => services.GetRequiredService<OpenAiChartImageEditor>());
 
@@ -72,6 +73,14 @@ app.MapPut("/api/target", async (TargetRequest request, StateStore store, Cancel
 
 app.MapGet("/api/charts/pending", async (ChartReviewService review, CancellationToken cancellationToken) => Results.Ok(await review.ScanAsync(cancellationToken)));
 app.MapGet("/api/charts/published", async (ChartReviewService review, CancellationToken cancellationToken) => Results.Ok(await review.PublishedAsync(cancellationToken)));
+app.MapGet("/api/fx", async (string from, string to, CurrencyConversionService conversion, CancellationToken cancellationToken) =>
+{
+    try { return Results.Ok(await conversion.GetRateAsync(from, to, cancellationToken)); }
+    catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or HttpRequestException or TaskCanceledException)
+    {
+        return Results.BadRequest(new { error = ex.Message });
+    }
+});
 
 app.MapPost("/api/charts/{ticker}/reopen", async (string ticker, ChartReviewService review, CancellationToken cancellationToken) =>
 {

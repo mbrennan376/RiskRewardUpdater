@@ -24,6 +24,11 @@
         <form id="reviewForm">
           <div class="form-heading"><div><span class="eyebrow">REVIEWING</span><h2 id="formTicker"></h2></div><span id="saveState">Saved</span></div>
           <label>Ticker<input id="ticker" required maxlength="15"></label><label>Company<input id="company" required></label>
+          <section class="currency-tools">
+            <div class="two-column"><label>Chart currency<select id="chartCurrency"><option value="USD">USD — US dollars</option><option value="CAD">CAD — Canadian dollars</option></select></label><label>Exchange (optional)<input id="exchange" placeholder="NASDAQ, NYSE, TSX, TSXV"></label></div>
+            <div class="two-column"><label>USD market ticker<input id="usdTicker" placeholder="Example: GKPRF"></label><label>CAD market ticker<input id="cadTicker" placeholder="Example: GSI.V"></label></div>
+            <p id="currencyNote" class="hint">Changing currency converts both chart boundaries using the latest Bank of Canada daily reference rate.</p>
+          </section>
           <div class="two-column"><label>Upper line<input id="upperLine" type="number" min="0" step="any" placeholder="Top boundary"></label><label>Lower line<input id="lowerLine" type="number" min="0" step="any" placeholder="Bottom boundary"></label></div>
           <p class="hint">Use the numeric upper and lower boundaries regardless of the line colors.</p>
           <section class="ai-tools">
@@ -39,6 +44,6 @@
       </article>
     </section>
   </main>
-  <script src="admin.js?v=20260923-6" defer></script>
+  <script src="admin.js?v=20260924-1" defer></script>
 </body>
 </html>

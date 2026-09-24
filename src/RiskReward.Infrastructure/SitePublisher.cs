@@ -52,8 +52,12 @@ public sealed class SitePublisher
                 ImageHash = draft.ImageHash,
                 UpperLine = draft.UpperLine,
                 LowerLine = draft.LowerLine,
+                Currency = MarketMetadata.NormalizeCurrency(draft.Currency, draft.TickerSymbol),
+                Exchange = draft.Exchange,
+                CurrencyTickerSymbols = new(draft.CurrencyTickerSymbols, StringComparer.OrdinalIgnoreCase),
                 Comments = draft.Comments,
                 ProviderSymbols = new(draft.ProviderSymbols, StringComparer.OrdinalIgnoreCase),
+                CurrencyProviderSymbols = draft.CurrencyProviderSymbols.ToDictionary(pair => pair.Key, pair => new Dictionary<string, string>(pair.Value, StringComparer.OrdinalIgnoreCase), StringComparer.OrdinalIgnoreCase),
                 Analysis = draft.Analysis ?? new ChartAnalysis { SourceImageHash = draft.ImageHash }
             };
         }
@@ -126,7 +130,10 @@ public sealed class SitePublisher
         foreach (var file in Directory.EnumerateFiles(options.StaticSiteSourcePath, "*", SearchOption.AllDirectories).Where(path => !IsExcluded(options.StaticSiteSourcePath, path)))
         {
             var relative = Path.GetRelativePath(options.StaticSiteSourcePath, file).Replace('\\', '/');
-            if (relative.Equals("data.json", StringComparison.OrdinalIgnoreCase) || relative.StartsWith("charts/", StringComparison.OrdinalIgnoreCase)) continue;
+            if (relative.Equals("data.json", StringComparison.OrdinalIgnoreCase) ||
+                relative.Equals("prices.json", StringComparison.OrdinalIgnoreCase) ||
+                relative.StartsWith("history/", StringComparison.OrdinalIgnoreCase) ||
+                relative.StartsWith("charts/", StringComparison.OrdinalIgnoreCase)) continue;
             await container.GetBlobClient(relative).UploadAsync(file, new BlobUploadOptions
             {
                 HttpHeaders = new BlobHttpHeaders { ContentType = ContentType(file), CacheControl = relative.Equals("index.html", StringComparison.OrdinalIgnoreCase) ? "no-cache" : "public, max-age=300" }
@@ -156,7 +163,10 @@ public sealed class SitePublisher
                      .Where(path => !IsExcluded(source, path)))
         {
             var relative = Path.GetRelativePath(source, file);
-            if (relative.Equals("data.json", StringComparison.OrdinalIgnoreCase) || relative.StartsWith("charts" + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)) continue;
+            if (relative.Equals("data.json", StringComparison.OrdinalIgnoreCase) ||
+                relative.Equals("prices.json", StringComparison.OrdinalIgnoreCase) ||
+                relative.StartsWith("history" + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase) ||
+                relative.StartsWith("charts" + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)) continue;
             var target = Path.Combine(destination, relative);
             Directory.CreateDirectory(Path.GetDirectoryName(target)!);
             File.Copy(file, target, true);

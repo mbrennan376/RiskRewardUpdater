@@ -6,6 +6,7 @@ This solution contains a localhost chart-review site, shared chart/price infrast
 
 1. Run `dotnet run --project RiskRewardUpdater.csproj` and open `http://127.0.0.1:5188`.
 2. Review every changed screenshot. Enter numeric **upper** and **lower** lines; line color is intentionally ignored.
+   - Choose whether that week's chart is USD or CAD. You can save a ticker/provider mapping for each currency (for example, `GKPRF` and `GSI.V`). Switching currency converts the saved upper and lower lines with the latest daily Bank of Canada USD/CAD rate.
    - Optionally ask OpenAI to suggest both values. Suggested values are copied into the inputs but the chart is returned to draft status for your review.
    - Optionally ask OpenAI to remove the lower-left presenter video box. The generated candidate is never selected automatically; compare it with the original and explicitly choose which image to publish.
 3. Mark each screenshot ready or skipped, then publish. The default target is `C:\RiskReward\PreviewSite` and is available at `/preview/` from the admin app.
@@ -48,6 +49,10 @@ The service writes a daily application log and `provider-summary-YYYY-MM-DD.csv`
 The normal final market-hours update begins at 4:00 PM Eastern. If it fails to publish fresh quotes for every chart, the service retries every five minutes through 4:30 PM; a service started during that recovery window attempts the missed close update immediately.
 
 Every Windows Service start performs an immediate price refresh regardless of market hours. Outside market hours, Twelve Data's timestamp-free price response is labeled with the most recent weekday 4:00 PM Eastern close so the static site does not represent a closing price as a live observation.
+
+Each fresh provider observation is also stored as compact static history under `history/manifest.json` and `history/{symbol}/yyyy-MM.json`. Provider timestamps are preferred; Twelve Data observations use the applicable 15-minute scheduler slot. Duplicate or older observations are not appended, and a history failure does not discard an otherwise valid `prices.json` update. The browser-side history loader returns available partial ranges and treats a missing manifest entry as a normal no-history state. No history chart is displayed yet.
+
+The public site includes a right-side navigation drawer, About and Methodology pages, and the original Mark Gomes research link. The Methodology page distinguishes Mark's published buy-near-green/sell-near-red and 10-point guidance from this site's exact logarithmic interpolation formula.
 
 `--run-once` explicitly loads the project's .NET user-secrets even when the console environment is Production. An installed Windows Service normally runs under a different Windows identity and should receive its keys through protected service configuration or environment variables instead of developer user-secrets.
 

@@ -40,9 +40,9 @@ public sealed class MarketScheduleTests
     }
 
     [Fact]
-    public void UsesObservationTimeDuringMarketHours()
+    public void UsesSchedulerSlotDuringMarketHours()
     {
-        var observed = DateTimeOffset.Parse("2026-09-23T15:00:00Z");
-        Assert.Equal(observed, MarketSchedule.EffectiveQuoteTime(observed));
+        var observed = DateTimeOffset.Parse("2026-09-23T15:08:37Z");
+        Assert.Equal(DateTimeOffset.Parse("2026-09-23T11:00:00-04:00"), MarketSchedule.EffectiveQuoteTime(observed));
     }
 }

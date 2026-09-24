@@ -29,6 +29,7 @@ builder.Services.AddHttpClient<FinnhubQuoteProvider>();
 builder.Services.AddSingleton<IQuoteProvider>(services => services.GetRequiredService<TwelveDataQuoteProvider>());
 builder.Services.AddSingleton<IQuoteProvider>(services => services.GetRequiredService<FinnhubQuoteProvider>());
 builder.Services.AddSingleton<ProviderRunCsvLogger>();
+builder.Services.AddSingleton<PriceHistoryStore>();
 builder.Services.AddSingleton<PriceUpdateService>();
 builder.Services.AddSingleton<StaticSiteDeploymentService>();
 if (!runOnce && deploySitePath is null) builder.Services.AddHostedService<Worker>();

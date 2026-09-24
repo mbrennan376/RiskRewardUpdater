@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="Current risk/reward charts and allocation ranges.">
+  <title>Risk/Reward Charts</title><link rel="stylesheet" href="css/styles.css"><link rel="stylesheet" href="css/dashboard-fit.css?v=20260923-1"><link rel="stylesheet" href="css/market-status.css?v=20260923-1"><link rel="stylesheet" href="css/navigation.css?v=20260924-1">
+</head>
+<body>
+  <header class="app-header">
+    <div><span class="eyebrow">MONEY MARK CHARTS</span><h1>Risk / Reward</h1></div>
+    <div class="header-status"><span id="marketStatus" class="status-pill">Loading prices</span><button id="menuButton" class="icon-button" aria-expanded="false" aria-controls="siteNavigation">Menu</button></div>
+  </header>
+  <main class="dashboard">
+    <aside class="browser-panel">
+      <div class="search-wrap"><label for="search">Find a company</label><input id="search" type="search" placeholder="Ticker or company…" autocomplete="off"></div>
+      <div class="list-summary"><span id="resultCount">— charts</span><span>Allocation</span></div>
+      <div id="chartList" class="chart-list" role="listbox" aria-label="Risk reward charts"></div>
+    </aside>
+    <section id="detail" class="detail-panel" aria-live="polite">
+      <div class="empty-state"><span class="eyebrow">CHART LIBRARY</span><h2>Select a chart</h2><p>Choose a ticker to see its current price and risk/reward position.</p></div>
+    </section>
+  </main>
+  <dialog id="lightbox"><button id="lightboxClose" class="close-button" aria-label="Close chart">×</button><img id="lightboxImage" alt="Expanded risk/reward chart"></dialog>
+  <script src="js/navigation.js?v=20260924-1" defer></script><script src="js/history.js?v=20260924-1" defer></script><script src="js/scripts.js?v=20260924-1" defer></script>
+  <!-- Cloudflare Web Analytics --><script type="module" src="https://static.cloudflareinsights.com/beacon.min.js" data-cf-beacon='{"token":"c464d95088a84f24825ee38646ae8609"}'></script><!-- End Cloudflare Web Analytics -->
+</body>
+</html>

@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="How the Risk/Reward site calculates allocation and price position."><title>Methodology · Risk/Reward Charts</title><link rel="stylesheet" href="css/styles.css"><link rel="stylesheet" href="css/navigation.css?v=20260924-1"><link rel="stylesheet" href="css/pages.css?v=20260924-1"></head>
+<body>
+  <header class="app-header"><div><span class="eyebrow">MONEY MARK CHARTS</span><h1>Methodology</h1></div><div class="header-status"><button id="menuButton" class="icon-button" aria-expanded="false" aria-controls="siteNavigation">Menu</button></div></header>
+  <main class="content-page"><article>
+    <span class="eyebrow">HOW THE NUMBERS WORK</span><h2>Allocation follows logarithmic price position</h2>
+    <p>Each chart has a lower line and an upper line. The lower line maps to a 10% allocation of invested cash and the upper line maps to 0%. Prices between them are interpolated on a logarithmic scale, matching the logarithmic price axis used by the charts.</p>
+    <div class="formula-card"><span>Suggested allocation</span><code>clamp(10 × ln(upper ÷ current) ÷ ln(upper ÷ lower), 0, 10)</code></div>
+    <p>On a logarithmic scale, halfway means the geometric midpoint—not the ordinary arithmetic midpoint. Therefore, when <code>current = √(upper × lower)</code>, the displayed allocation is 5%.</p>
+    <h3>Risk/reward position</h3><p>The position shown along the colored range is the inverse view of the same calculation:</p>
+    <div class="formula-card"><span>Position from lower to upper</span><code>clamp(100 × ln(current ÷ lower) ÷ ln(upper ÷ lower), 0, 100)</code></div>
+    <ul><li>0% position: at or below the lower line; allocation is 10%.</li><li>50% position: logarithmically halfway; allocation is 5%.</li><li>100% position: at or above the upper line; allocation is 0%.</li></ul>
+    <h3>Relationship to Mark Gomes’s methodology</h3><p>Mark Gomes describes using his fundamental risk/reward charts to buy nearer the green/lower line, take profits nearer the red/upper line, and size positions using his “10-point rule.” The exact equations above are this site’s implementation of that guidance; the cited article does not publish this formula.</p>
+    <p><a href="https://markgomesstocks.wordpress.com/2019/10/11/get-rich/" target="_blank" rel="noopener">Original source: “Get Rich On Stocks! (The Rules),” Mark Gomes Research, October 11, 2019</a></p>
+    <p class="method-note">The calculation is descriptive, not investment advice. Market-alert rules and company-specific fundamental considerations can override mechanical position sizing in Mark’s methodology.</p>
+  </article></main>
+  <script src="js/navigation.js?v=20260924-1" defer></script>
+  <!-- Cloudflare Web Analytics --><script type="module" src="https://static.cloudflareinsights.com/beacon.min.js" data-cf-beacon='{"token":"c464d95088a84f24825ee38646ae8609"}'></script><!-- End Cloudflare Web Analytics -->
+</body></html>
