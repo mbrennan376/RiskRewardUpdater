@@ -23,7 +23,9 @@ public sealed class PriceHistoryStoreTests : IDisposable
         Assert.Single(history.Points);
         Assert.Equal(new HistoricalPricePoint(timestamp, 1.67m), history.Points[0]);
         Assert.Equal("CAD", history.Currency);
+        Assert.Equal("GSI", history.ChartTickerSymbol);
         Assert.Equal("TSXV", history.Exchange);
+        Assert.Equal("GSI", manifest["GSI.V"].ChartTickerSymbol);
         Assert.Equal(timestamp, manifest["GSI.V"].First);
         Assert.Equal(["2026-09.json"], manifest["GSI.V"].Files);
         var json = (await File.ReadAllTextAsync(HistoryPath("GSI.V", "2026-09.json"))).Replace("\r\n", "\n");
@@ -81,6 +83,25 @@ public sealed class PriceHistoryStoreTests : IDisposable
         Assert.True(File.Exists(HistoryPath("GSI.V", "2026-09.json")));
         Assert.True(File.Exists(HistoryPath("GSI.V", "2026-10.json")));
         Assert.Equal(["2026-09.json", "2026-10.json"], (await ReadManifest())["GSI.V"].Files);
+    }
+
+    [Fact]
+    public async Task KeepsDerivedPricesOutOfTheNativeCanadianSeries()
+    {
+        var store = CreateStore();
+        var timestamp = DateTimeOffset.Parse("2026-09-24T15:00:00Z");
+        var quote = new Quote("GSI", 1.84m, timestamp, "eodhd + Bank of Canada", Currency: "CAD",
+            IsDerived: true, SourceSymbol: "GKPRF", ConversionRate: 1.35m, ConversionProvider: "Bank of Canada Valet");
+
+        await store.UpdateAsync(DeploymentTarget.Local, Catalog(),
+            new Dictionary<string, Quote>(StringComparer.OrdinalIgnoreCase) { ["GSI"] = quote });
+
+        Assert.False(File.Exists(HistoryPath("GSI.V", "2026-09.json")));
+        var derived = await ReadHistory("GSI.V-DERIVED", "2026-09.json");
+        var manifest = await ReadManifest();
+        Assert.True(derived.IsDerived);
+        Assert.Equal("GKPRF", derived.SourceSymbol);
+        Assert.True(manifest["GSI.V-DERIVED"].IsDerived);
     }
 
     private PriceHistoryStore CreateStore() => new(Options.Create(new RiskRewardOptions { LocalSitePath = root }), NullLogger<PriceHistoryStore>.Instance);

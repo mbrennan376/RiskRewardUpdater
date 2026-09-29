@@ -42,6 +42,13 @@ public static class MarketSchedule
         var localClose = DateTime.SpecifyKind(closeDate.AddHours(16), DateTimeKind.Unspecified);
         return new DateTimeOffset(localClose, Eastern.GetUtcOffset(localClose));
     }
+
+    public static bool IsCurrentMarketSession(DateTimeOffset observation, DateTimeOffset utcNow)
+    {
+        var expected = TimeZoneInfo.ConvertTime(EffectiveQuoteTime(utcNow), Eastern).Date;
+        var observed = TimeZoneInfo.ConvertTime(observation, Eastern).Date;
+        return observed == expected;
+    }
 }
 
 public sealed record PriceUpdateResult(int FreshCount, int TotalCount, DeploymentTarget Target)
@@ -93,9 +100,10 @@ public sealed class PriceUpdateService
     private readonly ILogger<PriceUpdateService> logger;
     private readonly ProviderRunCsvLogger providerRuns;
     private readonly PriceHistoryStore history;
+    private readonly CurrencyConversionService currencyConversion;
     private int nextProvider;
 
-    public PriceUpdateService(IEnumerable<IQuoteProvider> providers, IOptions<RiskRewardOptions> options, StateStore stateStore, ILogger<PriceUpdateService> logger, ProviderRunCsvLogger providerRuns, PriceHistoryStore history)
+    public PriceUpdateService(IEnumerable<IQuoteProvider> providers, IOptions<RiskRewardOptions> options, StateStore stateStore, ILogger<PriceUpdateService> logger, ProviderRunCsvLogger providerRuns, PriceHistoryStore history, CurrencyConversionService currencyConversion)
     {
         this.providers = providers.ToList();
         this.options = options.Value;
@@ -103,6 +111,7 @@ public sealed class PriceUpdateService
         this.logger = logger;
         this.providerRuns = providerRuns;
         this.history = history;
+        this.currencyConversion = currencyConversion;
     }
 
     public async Task<PriceUpdateResult> UpdateAsync(CancellationToken cancellationToken = default)
@@ -119,17 +128,24 @@ public sealed class PriceUpdateService
         var catalog = await ReadCatalogAsync(target, cancellationToken);
         if (catalog.Charts.Count == 0) { logger.LogInformation("No published charts were found."); return new PriceUpdateResult(0, 0, target); }
 
-        var primary = providers[nextProvider++ % providers.Count];
-        var fallback = providers[(nextProvider) % providers.Count];
-        var primarySymbols = BuildSymbols(catalog, primary.Name);
-        var quotes = new Dictionary<string, Quote>(await GetQuotesSafelyAsync(primary, primarySymbols, cancellationToken), StringComparer.OrdinalIgnoreCase);
-        var missing = catalog.Charts.Where(chart => !quotes.ContainsKey(chart.TickerSymbol)).ToList();
-        if (missing.Count > 0)
+        var alternating = providers.Where(provider => !provider.Name.Equals("eodhd", StringComparison.OrdinalIgnoreCase)).ToList();
+        var eodhd = providers.Where(provider => provider.Name.Equals("eodhd", StringComparison.OrdinalIgnoreCase));
+        var start = nextProvider++ % alternating.Count;
+        var orderedProviders = alternating.Skip(start).Concat(alternating.Take(start)).Concat(eodhd).ToList();
+        var primary = orderedProviders[0];
+        var quotes = new Dictionary<string, Quote>(StringComparer.OrdinalIgnoreCase);
+        foreach (var provider in orderedProviders)
         {
-            logger.LogWarning("{Provider} missed {Count} symbols; falling back to {Fallback}.", primary.Name, missing.Count, fallback.Name);
-            var fallbackCatalog = new ChartCatalog { Charts = missing };
-            foreach (var pair in await GetQuotesSafelyAsync(fallback, BuildSymbols(fallbackCatalog, fallback.Name), cancellationToken)) quotes[pair.Key] = pair.Value;
+            var missing = catalog.Charts.Where(chart => !quotes.ContainsKey(chart.TickerSymbol)).ToList();
+            if (missing.Count == 0) break;
+            if (provider != primary)
+                logger.LogWarning("Quote providers still missed {Count} symbols; trying {Provider}.", missing.Count, provider.Name);
+            var providerCatalog = new ChartCatalog { Charts = missing };
+            foreach (var pair in await GetQuotesSafelyAsync(provider, BuildSymbols(providerCatalog, provider.Name), cancellationToken))
+                quotes[pair.Key] = pair.Value;
         }
+
+        await AddDerivedCadFallbacksAsync(catalog, quotes, orderedProviders, cancellationToken);
 
         var freshQuotes = new Dictionary<string, Quote>(quotes, StringComparer.OrdinalIgnoreCase);
         var freshCount = freshQuotes.Count;
@@ -137,7 +153,8 @@ public sealed class PriceUpdateService
         foreach (var chart in catalog.Charts)
         {
             if (quotes.ContainsKey(chart.TickerSymbol)) continue;
-            if (previous.Quotes.TryGetValue(chart.TickerSymbol, out var old)) quotes[chart.TickerSymbol] = old with { IsStale = true, Error = "Both quote providers failed." };
+            if (previous.Quotes.TryGetValue(chart.TickerSymbol, out var old) && MarketMetadata.QuoteMatchesChartCurrency(chart, old))
+                quotes[chart.TickerSymbol] = old with { IsStale = true, Error = "All quote providers failed." };
         }
         await WritePricesAsync(target, new PriceCatalog { GeneratedAt = DateTimeOffset.UtcNow, Quotes = quotes }, cancellationToken);
         try { await history.UpdateAsync(target, catalog, freshQuotes, cancellationToken); }
@@ -145,6 +162,67 @@ public sealed class PriceUpdateService
         catch (Exception ex) { logger.LogError(ex, "Current prices were published, but the history update failed and will be retried on a later run."); }
         logger.LogInformation("Published {Count}/{Total} prices to {Target}, including {FreshCount} fresh quotes; primary provider was {Provider}.", quotes.Count, catalog.Charts.Count, target, freshCount, primary.Name);
         return new PriceUpdateResult(freshCount, catalog.Charts.Count, target);
+    }
+
+    private async Task AddDerivedCadFallbacksAsync(
+        ChartCatalog catalog,
+        Dictionary<string, Quote> quotes,
+        IReadOnlyList<IQuoteProvider> providerOrder,
+        CancellationToken cancellationToken)
+    {
+        var candidates = catalog.Charts.Where(chart =>
+            !quotes.ContainsKey(chart.TickerSymbol) &&
+            MarketMetadata.NormalizeCurrency(chart.Currency, chart.TickerSymbol) == "CAD" &&
+            chart.CurrencyTickerSymbols.TryGetValue("USD", out var usdSymbol) && !string.IsNullOrWhiteSpace(usdSymbol)).ToList();
+        if (candidates.Count == 0) return;
+
+        CurrencyRate rate;
+        try { rate = await currencyConversion.GetRateAsync("USD", "CAD", cancellationToken); }
+        catch (Exception ex) when (ex is HttpRequestException or JsonException or InvalidOperationException or TaskCanceledException)
+        {
+            logger.LogWarning(ex, "USD-listed fallback quotes could not be converted to CAD.");
+            return;
+        }
+
+        foreach (var provider in providerOrder)
+        {
+            var unresolved = candidates.Where(chart => !quotes.ContainsKey(chart.TickerSymbol)).ToList();
+            if (unresolved.Count == 0) break;
+            var fallbackCatalog = new ChartCatalog { Charts = unresolved };
+            var symbols = BuildSymbols(fallbackCatalog, provider.Name, "USD");
+            var fallbackQuotes = await GetQuotesSafelyAsync(provider, symbols, cancellationToken);
+            foreach (var pair in fallbackQuotes)
+            {
+                var source = pair.Value;
+                if (!source.TimestampIsProviderSupplied || !MarketSchedule.IsCurrentMarketSession(source.QuotedAt, DateTimeOffset.UtcNow))
+                {
+                    logger.LogWarning("Rejected stale or timestamp-free derived fallback for {Ticker} from {Provider} at {Timestamp:O}.",
+                        pair.Key, provider.Name, source.QuotedAt);
+                    continue;
+                }
+                var sourceSymbol = symbols[pair.Key].Trim().ToUpperInvariant();
+                quotes[pair.Key] = source with
+                {
+                    Ticker = pair.Key,
+                    Price = decimal.Round(source.Price * rate.Rate, 6, MidpointRounding.AwayFromZero),
+                    Provider = $"{source.Provider} + {rate.Provider}",
+                    Currency = "CAD",
+                    IsDerived = true,
+                    SourceSymbol = sourceSymbol,
+                    ConversionRate = rate.Rate,
+                    ConversionProvider = rate.Provider,
+                    PreviousClose = source.PreviousClose is { } previousClose
+                        ? decimal.Round(previousClose * rate.Rate, 6, MidpointRounding.AwayFromZero)
+                        : null,
+                    DailyChange = source.DailyChange is { } dailyChange
+                        ? decimal.Round(dailyChange * rate.Rate, 6, MidpointRounding.AwayFromZero)
+                        : null,
+                    DailyChangePercent = source.DailyChangePercent
+                };
+                logger.LogInformation("Derived CAD quote for {Ticker} from {SourceSymbol}: USD {UsdPrice} x {Rate} = CAD {CadPrice}.",
+                    pair.Key, sourceSymbol, source.Price, rate.Rate, quotes[pair.Key].Price);
+            }
+        }
     }
 
     private async Task<IReadOnlyDictionary<string, Quote>> GetQuotesSafelyAsync(
@@ -171,14 +249,16 @@ public sealed class PriceUpdateService
         }
     }
 
-    private static Dictionary<string, string> BuildSymbols(ChartCatalog catalog, string provider) => catalog.Charts.ToDictionary(
+    private static Dictionary<string, string> BuildSymbols(ChartCatalog catalog, string provider, string? currencyOverride = null) => catalog.Charts.ToDictionary(
         chart => chart.TickerSymbol,
         chart =>
         {
-            var currency = MarketMetadata.NormalizeCurrency(chart.Currency, chart.TickerSymbol);
+            var currency = currencyOverride ?? MarketMetadata.NormalizeCurrency(chart.Currency, chart.TickerSymbol);
             if (chart.CurrencyProviderSymbols.TryGetValue(currency, out var currencySymbols) &&
                 currencySymbols.TryGetValue(provider, out var currencyMapped) && !string.IsNullOrWhiteSpace(currencyMapped)) return currencyMapped;
             if (chart.ProviderSymbols.TryGetValue(provider, out var mapped) && !string.IsNullOrWhiteSpace(mapped)) return mapped;
+            if (chart.CurrencyTickerSymbols.TryGetValue(currency, out var currencyTicker) && !string.IsNullOrWhiteSpace(currencyTicker))
+                return currencyTicker;
             return MarketMetadata.ActiveSymbol(chart);
         },
         StringComparer.OrdinalIgnoreCase);

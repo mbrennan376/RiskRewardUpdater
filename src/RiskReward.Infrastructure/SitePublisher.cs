@@ -62,6 +62,8 @@ public sealed class SitePublisher
             };
         }
 
+        foreach (var chart in nextCharts.Values)
+            chart.Currency = MarketMetadata.NormalizeCurrency(chart.Currency, MarketMetadata.ActiveSymbol(chart));
         var catalog = new ChartCatalog { GeneratedAt = DateTimeOffset.UtcNow, Charts = nextCharts.Values.OrderBy(c => c.TickerSymbol).ToList() };
         var record = new PublicationRecord { PublishedAt = DateTimeOffset.UtcNow, Target = target, Tickers = approved.Select(d => d.TickerSymbol).ToList() };
         try

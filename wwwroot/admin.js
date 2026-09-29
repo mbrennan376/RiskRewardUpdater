@@ -1,4 +1,4 @@
-const state={status:null,charts:[],published:[],selected:null};
+const state={status:null,charts:[],published:[],selected:null,view:location.hash.toLowerCase()==='#ages'?'ages':'review',ageQuery:'',ageFilter:'all'};
 const $=id=>document.getElementById(id);
 
 async function request(url,options={}){
@@ -15,7 +15,7 @@ async function load(){
   try{
     [state.status,state.charts]=await Promise.all([request('/api/status'),request('/api/charts/pending')]);
     state.published=await request('/api/charts/published');
-    renderTarget();renderQueue();renderExisting();
+    renderTarget();renderQueue();renderExisting();renderAges();renderView();
     if(state.selected){state.selected=state.charts.find(c=>c.tickerSymbol===state.selected.tickerSymbol)||state.charts[0];}
     else state.selected=state.charts[0];
     renderForm();showMessage(`${state.charts.length} changed screenshot${state.charts.length===1?'':'s'} found.`);
@@ -38,6 +38,30 @@ function renderTarget(){
   $('targetBadge').textContent=live?'Live Azure':'Local Preview';$('targetBadge').className=`badge ${live?'live':'local'}`;
   $('publish').textContent=live?'Publish to LIVE site':'Publish to local preview';$('publish').disabled=live&&!state.status.allowLivePublishing;
 }
+
+function renderView(){
+  const ages=state.view==='ages';$('reviewView').hidden=ages;$('ageView').hidden=!ages;$('toggleAgeView').textContent=ages?'Back to review':'Chart ages';
+}
+
+function parseChartDate(value){
+  if(!value)return null;const raw=String(value),date=/^\d{4}-\d{2}-\d{2}$/.test(raw)?new Date(`${raw}T12:00:00`):new Date(raw);return Number.isNaN(date.getTime())?null:date;
+}
+function ageInDays(date){if(!date)return null;const now=new Date(),today=Date.UTC(now.getFullYear(),now.getMonth(),now.getDate()),day=Date.UTC(date.getFullYear(),date.getMonth(),date.getDate());return Math.max(0,Math.floor((today-day)/86400000));}
+function ageText(days){if(days==null)return 'Unknown';if(days===0)return 'Today';if(days===1)return '1 day';if(days<14)return `${days} days`;const weeks=Math.floor(days/7),remainder=days%7;return `${weeks} week${weeks===1?'':'s'}${remainder?` ${remainder}d`:''}`;}
+function recommendation(days){if(days==null)return {label:'Date missing',kind:'missing'};if(days>=28)return {label:'Request update',kind:'request'};if(days>=14)return {label:'Consider asking',kind:'consider'};return {label:'Recent',kind:'recent'};}
+function screenshotInventory(){
+  const drafts=new Map(state.charts.map(chart=>[String(chart.tickerSymbol).toUpperCase(),chart])),rows=[];
+  for(const chart of state.published){const key=String(chart.tickerSymbol).toUpperCase(),draft=drafts.get(key),changed=Boolean(draft&&draft.imageHash&&draft.imageHash!==chart.imageHash),date=parseChartDate(changed?draft.sourceModifiedAt:chart.updatedDate);rows.push({ticker:chart.tickerSymbol,company:chart.companyName,date,days:ageInDays(date),source:changed?'Pending screenshot':'Published',pending:changed});drafts.delete(key);}
+  for(const draft of drafts.values()){const date=parseChartDate(draft.sourceModifiedAt);rows.push({ticker:draft.tickerSymbol,company:draft.companyName,date,days:ageInDays(date),source:'Pending screenshot',pending:true});}
+  return rows.sort((a,b)=>{if(a.days==null&&b.days==null)return String(a.ticker).localeCompare(String(b.ticker));if(a.days==null)return -1;if(b.days==null)return 1;return b.days-a.days||String(a.ticker).localeCompare(String(b.ticker));});
+}
+function renderAges(){
+  const all=screenshotInventory(),requestCount=all.filter(row=>row.days==null||row.days>=28).length,considerCount=all.filter(row=>row.days!=null&&row.days>=14&&row.days<28).length,recentCount=all.filter(row=>row.days!=null&&row.days<14).length,known=all.filter(row=>row.days!=null);
+  $('requestAgeCount').textContent=requestCount;$('considerAgeCount').textContent=considerCount;$('recentAgeCount').textContent=recentCount;$('oldestAge').textContent=known.length?ageText(Math.max(...known.map(row=>row.days))):'—';$('ageUpdatedAt').textContent=`Checked ${new Intl.DateTimeFormat('en-US',{timeStyle:'short'}).format(new Date())}`;
+  const query=state.ageQuery,passesFilter=row=>{if(state.ageFilter==='attention')return row.days==null||row.days>=14;if(state.ageFilter==='request')return row.days==null||row.days>=28;if(state.ageFilter==='recent')return row.days!=null&&row.days<14;return true;},filtered=all.filter(row=>`${row.ticker} ${row.company}`.toLowerCase().includes(query)&&passesFilter(row));
+  $('ageRows').replaceChildren(...filtered.map(row=>{const status=recommendation(row.days),tr=document.createElement('tr'),chart=document.createElement('td');chart.className='age-chart';chart.append(textNode('strong',row.ticker),textNode('small',row.company));const date=textNode('td',row.date?new Intl.DateTimeFormat('en-US',{dateStyle:'medium'}).format(row.date):'Unavailable','age-date'),age=textNode('td',ageText(row.days),'age-value'),advice=document.createElement('td'),source=document.createElement('td');advice.append(textNode('span',status.label,`age-pill ${status.kind}`));source.append(textNode('span',row.source,`source-pill ${row.pending?'pending':'published'}`));tr.append(chart,date,age,advice,source);return tr;}));$('ageEmpty').hidden=filtered.length!==0;
+}
+function textNode(tag,value,className=''){const node=document.createElement(tag);node.textContent=value;if(className)node.className=className;return node;}
 
 function renderQueue(){
   $('pendingCount').textContent=state.charts.filter(c=>!c.ready&&!c.skipped).length;
@@ -89,8 +113,8 @@ function formValue(ready=false,skipped=false){
 }
 
 function normalizeCurrency(value,ticker){const normalized=String(value||'').toUpperCase();if(normalized==='CAD'||normalized==='USD')return normalized;return /\.(V|TO)$/i.test(ticker)?'CAD':'USD';}
-function stashProviderSymbols(chart,currency){chart.currencyProviderSymbols=chart.currencyProviderSymbols||{};chart.currencyProviderSymbols[currency]={twelveData:$('twelveSymbol').value.trim(),finnhub:$('finnhubSymbol').value.trim()};}
-function loadProviderSymbols(chart,currency){const mapped=chart.currencyProviderSymbols?.[currency]||(normalizeCurrency(chart.currency,chart.tickerSymbol)===currency?chart.providerSymbols:null)||{};$('twelveSymbol').value=mapped.twelveData??'';$('finnhubSymbol').value=mapped.finnhub??'';}
+function stashProviderSymbols(chart,currency){chart.currencyProviderSymbols=chart.currencyProviderSymbols||{};chart.currencyProviderSymbols[currency]={twelveData:$('twelveSymbol').value.trim(),finnhub:$('finnhubSymbol').value.trim(),eodhd:$('eodhdSymbol').value.trim()};}
+function loadProviderSymbols(chart,currency){const mapped=chart.currencyProviderSymbols?.[currency]||(normalizeCurrency(chart.currency,chart.tickerSymbol)===currency?chart.providerSymbols:null)||{};$('twelveSymbol').value=mapped.twelveData??'';$('finnhubSymbol').value=mapped.finnhub??'';$('eodhdSymbol').value=mapped.eodhd??'';}
 function converted(value,rate){if(value==='')return '';const result=Number(value)*Number(rate);return Number.isFinite(result)?String(Number(result.toFixed(6))):value;}
 
 $('chartCurrency').addEventListener('change',async event=>{
@@ -164,9 +188,14 @@ async function chooseImage(useEditedImage){
 $('analyzeLines').onclick=()=>runAiAction('analyze',$('analyzeLines'),'Analyzing…');
 $('removeVideo').onclick=()=>runAiAction('remove-video',$('removeVideo'),'Editing…');
 $('showOriginal').onclick=()=>chooseImage(false);$('useEdited').onclick=()=>chooseImage(true);
+$('toggleAgeView').onclick=()=>{state.view=state.view==='ages'?'review':'ages';history.replaceState(null,'',state.view==='ages'?'#ages':location.pathname+location.search);renderView();if(state.view==='ages')renderAges();};
+$('refreshAges').onclick=load;
+$('ageSearch').addEventListener('input',event=>{state.ageQuery=event.target.value.trim().toLowerCase();renderAges();});
+$('ageFilter').addEventListener('change',event=>{state.ageFilter=event.target.value;renderAges();});
+window.addEventListener('hashchange',()=>{state.view=location.hash.toLowerCase()==='#ages'?'ages':'review';renderView();if(state.view==='ages')renderAges();});
 $('publish').onclick=async()=>{
   const live=String(state.status.target).toLowerCase()==='live',destination=live?'Live Azure':'the local preview';
   showMessage(`Publishing approved charts to ${destination}…`);
-  try{const result=await request('/api/publish',{method:'POST',body:'{}'});const confirmation=result.tickers.length?`Published ${result.tickers.length} chart(s) to ${destination}.`:`Published the current site assets and chart catalog to ${destination}.`;await load();showMessage(confirmation,'success');if(!live)openPreview();alert(confirmation);}catch(error){showMessage(error.message,'error');}
+  try{const result=await request('/api/publish',{method:'POST',body:'{}'});let confirmation=result.tickers.length?`Published ${result.tickers.length} chart(s) to ${destination}.`:`Published the current site assets and chart catalog to ${destination}.`;if(result.priceRefreshError)confirmation+=` The immediate price refresh failed: ${result.priceRefreshError}`;else if(result.priceRefreshAttempted)confirmation+=` Refreshed ${result.freshPriceCount??0}/${result.totalPriceCount??0} prices.`;await load();showMessage(confirmation,result.priceRefreshError?'error':'success');if(!live)openPreview();alert(confirmation);}catch(error){showMessage(error.message,'error');}
 };
-load();
+renderView();load();

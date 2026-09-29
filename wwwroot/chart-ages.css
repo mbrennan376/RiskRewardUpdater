@@ -1,0 +1,22 @@
+.age-view{display:grid;gap:16px}
+.age-heading{display:flex;align-items:end;justify-content:space-between;gap:20px;padding:4px 2px}
+.age-heading h2{margin:5px 0 4px;font-size:clamp(1.8rem,3vw,2.7rem);letter-spacing:-.04em}
+.age-heading p{margin:0;color:#8ea2b7}
+.age-summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+.age-summary>div{padding:16px 18px;border:1px solid #26364a;border-radius:15px;background:#101720}
+.age-summary strong,.age-summary span{display:block}.age-summary strong{font-size:1.65rem}.age-summary span{margin-top:3px;color:#8fa1b4;font-size:.72rem;text-transform:uppercase;letter-spacing:.07em}
+.age-controls{display:grid;grid-template-columns:minmax(220px,420px) minmax(170px,230px) 1fr;align-items:end;gap:12px;padding:13px 15px;border:1px solid #26364a;border-radius:14px;background:#0d131c}
+.age-controls label{margin:0}.age-controls span{align-self:center;justify-self:end;color:#72869a;font-size:.72rem}
+.age-table-shell{overflow:auto;border:1px solid #26364a;border-radius:16px;background:#0d131c}
+.age-table-shell table{width:100%;border-collapse:collapse}
+.age-table-shell th,.age-table-shell td{padding:13px 16px;border-bottom:1px solid #1e2b3b;text-align:left;vertical-align:middle}
+.age-table-shell th{position:sticky;top:0;z-index:1;background:#131d29;color:#8297ac;font-size:.66rem;text-transform:uppercase;letter-spacing:.09em}
+.age-table-shell tr:last-child td{border-bottom:0}.age-table-shell tbody tr:hover{background:#142033}
+.age-chart strong,.age-chart small{display:block}.age-chart small{margin-top:3px;color:#8195aa}
+.age-date{color:#aebdcb;white-space:nowrap}.age-value{font-weight:750;white-space:nowrap}
+.age-pill,.source-pill{display:inline-flex;align-items:center;border:1px solid;border-radius:999px;padding:5px 8px;font-size:.68rem;font-weight:800;white-space:nowrap}
+.age-pill.recent{border-color:#276951;background:#0d241c;color:#7ce2ba}.age-pill.consider{border-color:#775b2c;background:#261e10;color:#edc378}.age-pill.request,.age-pill.missing{border-color:#8d3542;background:#34131a;color:#ffc2c8}
+.source-pill{border-color:#315b83;background:#102139;color:#a9cffd}.source-pill.published{border-color:#3a485a;background:#18212c;color:#9eb0c3}
+.age-empty{padding:40px;text-align:center;color:#8396a9}.age-legend{margin:0;color:#8396a9;font-size:.76rem;line-height:2.2}.age-legend .age-pill{margin:0 4px 0 10px}.age-legend .age-pill:first-child{margin-left:0}
+@media(max-width:800px){.age-summary{grid-template-columns:1fr 1fr}.age-controls{grid-template-columns:1fr 1fr}.age-controls span{grid-column:1/-1;justify-self:start}.age-heading{align-items:start;flex-direction:column}}
+@media(max-width:520px){.age-summary,.age-controls{grid-template-columns:1fr}.age-table-shell th,.age-table-shell td{padding:11px 12px}.age-heading .button{width:100%}}

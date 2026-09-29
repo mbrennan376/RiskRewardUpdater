@@ -45,4 +45,14 @@ public sealed class MarketScheduleTests
         var observed = DateTimeOffset.Parse("2026-09-23T15:08:37Z");
         Assert.Equal(DateTimeOffset.Parse("2026-09-23T11:00:00-04:00"), MarketSchedule.EffectiveQuoteTime(observed));
     }
+
+    [Theory]
+    [InlineData("2026-09-24T15:15:00Z", "2026-09-24T16:00:00Z", true)]
+    [InlineData("2026-09-23T20:00:00Z", "2026-09-24T16:00:00Z", false)]
+    [InlineData("2026-09-25T20:00:00Z", "2026-09-26T16:00:00Z", true)]
+    public void ValidatesTheApplicableTradingSession(string observation, string now, bool expected)
+    {
+        Assert.Equal(expected, MarketSchedule.IsCurrentMarketSession(
+            DateTimeOffset.Parse(observation), DateTimeOffset.Parse(now)));
+    }
 }

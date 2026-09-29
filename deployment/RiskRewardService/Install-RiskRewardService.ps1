@@ -38,6 +38,8 @@ if ($confirmation -cne 'PUBLISH LIVE') {
 
 $twelveDataKey = Read-RequiredValue 'Twelve Data API key (paste and press Enter)' 16
 $finnhubKey = Read-RequiredValue 'Finnhub API key (paste and press Enter)' 20
+$eodhdKey = (Read-Host 'EODHD API key (optional; paste and press Enter)').Trim()
+if ($eodhdKey -and $eodhdKey.Length -lt 8) { throw 'The EODHD API key appears incomplete.' }
 $storageAccountName = (Read-Host 'Azure Storage account name').Trim()
 if ($storageAccountName -cnotmatch '^[a-z0-9]{3,24}$') {
     throw 'Enter only the Azure Storage account name: 3-24 lowercase letters and numbers, without a URL.'
@@ -84,6 +86,7 @@ $serviceEnvironment = @(
     "RiskReward__LiveContainerName=$containerName",
     "RiskReward__StateFolder=$stateRoot"
 )
+if ($eodhdKey) { $serviceEnvironment += "Providers__EodhdApiKey=$eodhdKey" }
 $serviceRegistry = "HKLM:\SYSTEM\CurrentControlSet\Services\$serviceName"
 New-ItemProperty -Path $serviceRegistry -Name Environment -PropertyType MultiString -Value $serviceEnvironment -Force | Out-Null
 & sc.exe failure $serviceName reset= 86400 actions= restart/60000/restart/60000/restart/60000 | Out-Null
@@ -94,6 +97,7 @@ $targetFile = Join-Path $stateRoot 'deployment-target.json'
 # The one-time process needs the same configuration that Service Control Manager will supply later.
 $env:Providers__TwelveDataApiKey = $twelveDataKey
 $env:Providers__FinnhubApiKey = $finnhubKey
+if ($eodhdKey) { $env:Providers__EodhdApiKey = $eodhdKey }
 $env:RiskReward__AllowLivePublishing = 'true'
 $env:RiskReward__AzureStorageConnectionString = $azureConnection
 $env:RiskReward__LiveContainerName = $containerName

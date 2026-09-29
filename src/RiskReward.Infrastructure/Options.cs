@@ -16,6 +16,7 @@ public sealed class ProviderOptions
 {
     public string? TwelveDataApiKey { get; set; }
     public string? FinnhubApiKey { get; set; }
+    public string? EodhdApiKey { get; set; }
     public int RequestTimeoutSeconds { get; set; } = 20;
     public int FinnhubCycleTimeoutSeconds { get; set; } = 45;
 }

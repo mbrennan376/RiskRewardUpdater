@@ -72,6 +72,10 @@ public sealed class PublicationRecord
     public List<string> Tickers { get; set; } = [];
     public bool Succeeded { get; set; }
     public string? Error { get; set; }
+    public bool PriceRefreshAttempted { get; set; }
+    public int? FreshPriceCount { get; set; }
+    public int? TotalPriceCount { get; set; }
+    public string? PriceRefreshError { get; set; }
 }
 
 public sealed class ApplicationState
@@ -81,7 +85,22 @@ public sealed class ApplicationState
     public List<PublicationRecord> Publications { get; set; } = [];
 }
 
-public sealed record Quote(string Ticker, decimal Price, DateTimeOffset QuotedAt, string Provider, bool IsStale = false, string? Error = null, string Currency = "USD");
+public sealed record Quote(
+    string Ticker,
+    decimal Price,
+    DateTimeOffset QuotedAt,
+    string Provider,
+    bool IsStale = false,
+    string? Error = null,
+    string Currency = "USD",
+    bool TimestampIsProviderSupplied = true,
+    bool IsDerived = false,
+    string? SourceSymbol = null,
+    decimal? ConversionRate = null,
+    string? ConversionProvider = null,
+    decimal? PreviousClose = null,
+    decimal? DailyChange = null,
+    decimal? DailyChangePercent = null);
 
 public sealed class PriceCatalog
 {
@@ -95,7 +114,10 @@ public sealed record HistoricalPricePoint(DateTimeOffset Timestamp, decimal Pric
 public sealed class HistoricalPriceFile
 {
     public int SchemaVersion { get; set; } = 1;
+    public string ChartTickerSymbol { get; set; } = "";
     public string Symbol { get; set; } = "";
+    public bool IsDerived { get; set; }
+    public string? SourceSymbol { get; set; }
     public string Currency { get; set; } = "";
     public string? Exchange { get; set; }
     public int IntervalMinutes { get; set; } = 15;
@@ -105,6 +127,9 @@ public sealed class HistoricalPriceFile
 
 public sealed class HistoryManifestEntry
 {
+    public string ChartTickerSymbol { get; set; } = "";
+    public bool IsDerived { get; set; }
+    public string? SourceSymbol { get; set; }
     public string Currency { get; set; } = "";
     public string? Exchange { get; set; }
     public DateTimeOffset First { get; set; }
@@ -163,6 +188,9 @@ public static class MarketMetadata
             ? symbol.Trim().ToUpperInvariant()
             : chart.TickerSymbol;
     }
+
+    public static bool QuoteMatchesChartCurrency(RiskRewardChart chart, Quote quote) =>
+        NormalizeCurrency(quote.Currency, chart.TickerSymbol) == NormalizeCurrency(chart.Currency, chart.TickerSymbol);
 
     public static string? InferExchange(string? configured, string symbol)
     {

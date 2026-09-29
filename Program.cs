@@ -7,11 +7,21 @@ using System.Text.Json.Serialization;
 var builder = WebApplication.CreateBuilder(args);
 builder.WebHost.UseUrls(builder.Configuration["Urls"] ?? "http://127.0.0.1:5188");
 builder.Services.Configure<RiskRewardOptions>(builder.Configuration.GetSection("RiskReward"));
+builder.Services.Configure<ProviderOptions>(builder.Configuration.GetSection("Providers"));
 builder.Services.Configure<OpenAiOptions>(builder.Configuration.GetSection("OpenAI"));
 builder.Services.ConfigureHttpJsonOptions(options => options.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 builder.Services.AddSingleton<StateStore>();
 builder.Services.AddSingleton<ChartReviewService>();
 builder.Services.AddSingleton<SitePublisher>();
+builder.Services.AddHttpClient<TwelveDataQuoteProvider>();
+builder.Services.AddHttpClient<FinnhubQuoteProvider>();
+builder.Services.AddHttpClient<EodhdQuoteProvider>();
+builder.Services.AddSingleton<IQuoteProvider>(services => services.GetRequiredService<TwelveDataQuoteProvider>());
+builder.Services.AddSingleton<IQuoteProvider>(services => services.GetRequiredService<FinnhubQuoteProvider>());
+builder.Services.AddSingleton<IQuoteProvider>(services => services.GetRequiredService<EodhdQuoteProvider>());
+builder.Services.AddSingleton<ProviderRunCsvLogger>();
+builder.Services.AddSingleton<PriceHistoryStore>();
+builder.Services.AddSingleton<PriceUpdateService>();
 builder.Services.AddHttpClient<OpenAiChartAnalyzer>();
 builder.Services.AddHttpClient<OpenAiChartImageEditor>();
 builder.Services.AddHttpClient<CurrencyConversionService>();
@@ -153,12 +163,26 @@ app.MapPut("/api/charts/{ticker}/image-choice", async (string ticker, ImageChoic
     catch (InvalidOperationException ex) { return Results.BadRequest(new { error = ex.Message }); }
 });
 
-app.MapPost("/api/publish", async (StateStore store, SitePublisher publisher, CancellationToken cancellationToken) =>
+app.MapPost("/api/publish", async (StateStore store, SitePublisher publisher, PriceUpdateService priceUpdater, ILoggerFactory loggerFactory, CancellationToken cancellationToken) =>
 {
     try
     {
         var target = await store.GetTargetAsync(cancellationToken);
-        return Results.Ok(await publisher.PublishApprovedAsync(target, cancellationToken));
+        var publication = await publisher.PublishApprovedAsync(target, cancellationToken);
+        publication.PriceRefreshAttempted = true;
+        try
+        {
+            var prices = await priceUpdater.UpdateAsync(cancellationToken);
+            publication.FreshPriceCount = prices.FreshCount;
+            publication.TotalPriceCount = prices.TotalCount;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            publication.PriceRefreshError = ex.Message;
+            loggerFactory.CreateLogger("PublishPriceRefresh").LogError(ex,
+                "Chart publication succeeded, but its immediate price refresh failed.");
+        }
+        return Results.Ok(publication);
     }
     catch (Exception ex) when (ex is InvalidOperationException or DirectoryNotFoundException)
     {

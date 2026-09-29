@@ -2,48 +2,58 @@
 <html lang="en">
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Risk/Reward Publisher</title><link rel="stylesheet" href="admin.css"><link rel="stylesheet" href="ai-tools.css"><link rel="stylesheet" href="existing-charts.css">
+  <title>Risk/Reward Publisher</title><link rel="stylesheet" href="admin.css"><link rel="stylesheet" href="ai-tools.css"><link rel="stylesheet" href="existing-charts.css"><link rel="stylesheet" href="chart-ages.css?v=20260925-1">
 </head>
 <body>
   <header class="topbar">
     <div><span class="eyebrow">LOCAL PUBLISHER</span><h1>Chart review</h1></div>
-    <div class="target-panel"><span id="targetBadge" class="badge live">Live Azure</span><label class="switch" title="Toggle between Live Azure and local preview"><input id="targetSwitch" type="checkbox" checked><span></span></label><button id="openPreview" class="button secondary">Open local preview</button></div>
+    <div class="target-panel"><button id="toggleAgeView" class="button secondary">Chart ages</button><span id="targetBadge" class="badge live">Live Azure</span><label class="switch" title="Toggle between Live Azure and local preview"><input id="targetSwitch" type="checkbox" checked><span></span></label><button id="openPreview" class="button secondary">Open local preview</button></div>
   </header>
   <main>
-    <section class="summary-card">
-      <div><strong id="pendingCount">—</strong><span>Pending</span></div><div><strong id="readyCount">—</strong><span>Ready</span></div><div><strong id="skippedCount">—</strong><span>Skipped</span></div>
-      <button id="rescan" class="button secondary">Rescan folder</button><button id="publish" class="button accent">Publish to local preview</button>
+    <section id="reviewView">
+      <section class="summary-card">
+        <div><strong id="pendingCount">—</strong><span>Pending</span></div><div><strong id="readyCount">—</strong><span>Ready</span></div><div><strong id="skippedCount">—</strong><span>Skipped</span></div>
+        <button id="rescan" class="button secondary">Rescan folder</button><button id="publish" class="button accent">Publish to local preview</button>
+      </section>
+      <div id="message" class="message" role="status"></div>
+      <section class="existing-tools"><label for="existingChart">Edit an unchanged chart</label><select id="existingChart"></select><button id="reopenChart" class="button secondary">Open for review</button></section>
+      <section id="empty" class="empty" hidden><h2>No changed screenshots</h2><p>The folder matches the last live publication.</p></section>
+      <section id="workspace" class="workspace" hidden>
+        <aside id="queue" class="queue"></aside>
+        <article class="review-card">
+          <div class="image-shell"><img id="chartImage" alt="Chart awaiting review"></div>
+          <form id="reviewForm">
+            <div class="form-heading"><div><span class="eyebrow">REVIEWING</span><h2 id="formTicker"></h2></div><span id="saveState">Saved</span></div>
+            <label>Ticker<input id="ticker" required maxlength="15"></label><label>Company<input id="company" required></label>
+            <section class="currency-tools">
+              <div class="two-column"><label>Chart currency<select id="chartCurrency"><option value="USD">USD — US dollars</option><option value="CAD">CAD — Canadian dollars</option></select></label><label>Exchange (optional)<input id="exchange" placeholder="NASDAQ, NYSE, TSX, TSXV"></label></div>
+              <div class="two-column"><label>USD market ticker<input id="usdTicker" placeholder="Example: GKPRF"></label><label>CAD market ticker<input id="cadTicker" placeholder="Example: GSI.V"></label></div>
+              <p id="currencyNote" class="hint">Changing currency converts both chart boundaries using the latest Bank of Canada daily reference rate.</p>
+            </section>
+            <div class="two-column"><label>Upper line<input id="upperLine" type="number" min="0" step="any" placeholder="Top boundary"></label><label>Lower line<input id="lowerLine" type="number" min="0" step="any" placeholder="Bottom boundary"></label></div>
+            <p class="hint">Use the numeric upper and lower boundaries regardless of the line colors.</p>
+            <section class="ai-tools">
+              <div><span class="eyebrow">OPTIONAL OPENAI ASSISTANCE</span><p>Each action sends this screenshot to the configured OpenAI API and may incur usage charges. Results always require your review.</p></div>
+              <div class="ai-buttons"><button type="button" id="analyzeLines" class="button secondary">Suggest risk/reward lines</button><button type="button" id="removeVideo" class="button secondary">Remove video box</button></div>
+              <div id="analysisResult" class="analysis-result" hidden></div>
+              <div id="imageChoice" class="image-choice" hidden><span>Edited candidate ready</span><button type="button" id="showOriginal" class="button secondary">Use original</button><button type="button" id="useEdited" class="button secondary">Use edited</button></div>
+            </section>
+            <div class="two-column"><label>Twelve Data symbol<input id="twelveSymbol" placeholder="Defaults to ticker"></label><label>Finnhub symbol<input id="finnhubSymbol" placeholder="Defaults to ticker"></label></div>
+            <label>EODHD symbol<input id="eodhdSymbol" placeholder="Defaults to ticker, e.g. GEO.TO"></label>
+            <label>Comments<textarea id="comments" rows="3"></textarea></label>
+            <div class="actions"><button type="button" id="skip" class="button secondary">Skip</button><button type="button" id="save" class="button secondary">Save draft</button><button type="submit" class="button accent">Mark ready</button></div>
+          </form>
+        </article>
+      </section>
     </section>
-    <div id="message" class="message" role="status"></div>
-    <section class="existing-tools"><label for="existingChart">Edit an unchanged chart</label><select id="existingChart"></select><button id="reopenChart" class="button secondary">Open for review</button></section>
-    <section id="empty" class="empty" hidden><h2>No changed screenshots</h2><p>The folder matches the last live publication.</p></section>
-    <section id="workspace" class="workspace" hidden>
-      <aside id="queue" class="queue"></aside>
-      <article class="review-card">
-        <div class="image-shell"><img id="chartImage" alt="Chart awaiting review"></div>
-        <form id="reviewForm">
-          <div class="form-heading"><div><span class="eyebrow">REVIEWING</span><h2 id="formTicker"></h2></div><span id="saveState">Saved</span></div>
-          <label>Ticker<input id="ticker" required maxlength="15"></label><label>Company<input id="company" required></label>
-          <section class="currency-tools">
-            <div class="two-column"><label>Chart currency<select id="chartCurrency"><option value="USD">USD — US dollars</option><option value="CAD">CAD — Canadian dollars</option></select></label><label>Exchange (optional)<input id="exchange" placeholder="NASDAQ, NYSE, TSX, TSXV"></label></div>
-            <div class="two-column"><label>USD market ticker<input id="usdTicker" placeholder="Example: GKPRF"></label><label>CAD market ticker<input id="cadTicker" placeholder="Example: GSI.V"></label></div>
-            <p id="currencyNote" class="hint">Changing currency converts both chart boundaries using the latest Bank of Canada daily reference rate.</p>
-          </section>
-          <div class="two-column"><label>Upper line<input id="upperLine" type="number" min="0" step="any" placeholder="Top boundary"></label><label>Lower line<input id="lowerLine" type="number" min="0" step="any" placeholder="Bottom boundary"></label></div>
-          <p class="hint">Use the numeric upper and lower boundaries regardless of the line colors.</p>
-          <section class="ai-tools">
-            <div><span class="eyebrow">OPTIONAL OPENAI ASSISTANCE</span><p>Each action sends this screenshot to the configured OpenAI API and may incur usage charges. Results always require your review.</p></div>
-            <div class="ai-buttons"><button type="button" id="analyzeLines" class="button secondary">Suggest risk/reward lines</button><button type="button" id="removeVideo" class="button secondary">Remove video box</button></div>
-            <div id="analysisResult" class="analysis-result" hidden></div>
-            <div id="imageChoice" class="image-choice" hidden><span>Edited candidate ready</span><button type="button" id="showOriginal" class="button secondary">Use original</button><button type="button" id="useEdited" class="button secondary">Use edited</button></div>
-          </section>
-          <div class="two-column"><label>Twelve Data symbol<input id="twelveSymbol" placeholder="Defaults to ticker"></label><label>Finnhub symbol<input id="finnhubSymbol" placeholder="Defaults to ticker"></label></div>
-          <label>Comments<textarea id="comments" rows="3"></textarea></label>
-          <div class="actions"><button type="button" id="skip" class="button secondary">Skip</button><button type="button" id="save" class="button secondary">Save draft</button><button type="submit" class="button accent">Mark ready</button></div>
-        </form>
-      </article>
+    <section id="ageView" class="age-view" hidden>
+      <div class="age-heading"><div><span class="eyebrow">CALL CHECKLIST</span><h2>Screenshot ages</h2><p>Oldest charts are listed first so you can decide which updates to request from Mark.</p></div><button id="refreshAges" class="button secondary">Refresh folder</button></div>
+      <div class="age-summary"><div><strong id="requestAgeCount">—</strong><span>Request update</span></div><div><strong id="considerAgeCount">—</strong><span>Consider asking</span></div><div><strong id="recentAgeCount">—</strong><span>Recent</span></div><div><strong id="oldestAge">—</strong><span>Oldest chart</span></div></div>
+      <div class="age-controls"><label>Find a chart<input id="ageSearch" type="search" placeholder="Ticker or company"></label><label>Show<select id="ageFilter"><option value="all">All charts</option><option value="attention">14+ days old</option><option value="request">28+ days old</option><option value="recent">Under 14 days</option></select></label><span id="ageUpdatedAt"></span></div>
+      <div class="age-table-shell"><table><thead><tr><th>Chart</th><th>Screenshot date</th><th>Age</th><th>Recommendation</th><th>Source</th></tr></thead><tbody id="ageRows"></tbody></table><div id="ageEmpty" class="age-empty" hidden>No charts match this filter.</div></div>
+      <p class="age-legend"><span class="age-pill recent">Recent</span> under 14 days <span class="age-pill consider">Consider asking</span> 14–27 days <span class="age-pill request">Request update</span> 28 days or older. These are planning cues, not automatic publishing rules.</p>
     </section>
   </main>
-  <script src="admin.js?v=20260924-1" defer></script>
+  <script src="admin.js?v=20260925-1" defer></script>
 </body>
 </html>

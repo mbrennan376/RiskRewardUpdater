@@ -15,6 +15,8 @@ This solution contains a localhost chart-review site, shared chart/price infrast
 
 The publisher can deploy the current static-site assets and chart catalog even when no screenshots changed. Use **Edit an unchanged chart** to reopen any published chart with its saved upper/lower boundaries, change its metadata, mark it ready, and republish it without replacing the screenshot.
 
+Use **Chart ages** during a weekly call to see every current screenshot sorted oldest first. The call checklist labels screenshots under 14 days as Recent, 14–27 days as Consider asking, and 28 days or older as Request update. Search and age filters are available. A genuinely changed screenshot in the watched folder replaces the published date in this view immediately, while merely reopening an unchanged chart does not make it appear newer.
+
 The shared deployment target is stored under `RiskReward:StateFolder`. The Windows Service reads that target before each update, so it also stays local until Live is deliberately enabled.
 
 ## Secrets
@@ -25,6 +27,7 @@ Do not commit API keys or Azure credentials. For local development:
 dotnet user-secrets set "RiskReward:AzureStorageConnectionString" "..." --project RiskRewardUpdater.csproj
 dotnet user-secrets set "Providers:TwelveDataApiKey" "..." --project RiskRewardUpdater.csproj
 dotnet user-secrets set "Providers:FinnhubApiKey" "..." --project RiskRewardUpdater.csproj
+dotnet user-secrets set "Providers:EodhdApiKey" "..." --project RiskRewardUpdater.csproj
 dotnet user-secrets set "OpenAI:ApiKey" "..." --project RiskRewardUpdater.csproj
 ```
 
@@ -34,7 +37,11 @@ The OpenAI actions are entirely optional and disabled until an API key is config
 
 ## Price service
 
-The service alternates Twelve Data and Finnhub every 15-minute polling cycle, falling back per missing symbol. It runs on weekdays from 9:30 a.m. through 4:00 p.m. Eastern. Provider-specific Canadian/OTC symbols can be entered during chart review.
+The service alternates Twelve Data and Finnhub every 15-minute polling cycle, falling back per missing symbol and then trying EODHD. It runs on weekdays from 9:30 a.m. through 4:00 p.m. Eastern. Provider-specific Canadian/OTC/EODHD symbols can be entered during chart review.
+
+If every provider misses a CAD listing, the service can derive a CAD value from that chart's mapped USD listing using the latest Bank of Canada USD/CAD rate. Only a provider-supplied timestamp from the current applicable market session is accepted. Derived quotes are labeled in `prices.json` and stored under a separate `{CAD-SYMBOL}-DERIVED` history series so they never contaminate native Canadian observations.
+
+Current quote records also retain `previousClose`, `dailyChange`, and `dailyChangePercent` when supplied by the provider. Twelve Data uses its `/quote` endpoint, while Finnhub and EODHD map their native daily-movement fields. A derived CAD fallback converts the previous close and absolute change with the same FX rate while retaining the percentage change. The public UI does not display these fields yet; they are being collected for the future ticker movement widget.
 
 To exercise the complete pipeline immediately without installing the Windows Service or waiting for a quarter-hour slot, run:
 

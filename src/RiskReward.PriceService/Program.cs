@@ -26,8 +26,11 @@ builder.Services.Configure<ProviderOptions>(builder.Configuration.GetSection("Pr
 builder.Services.AddSingleton<StateStore>();
 builder.Services.AddHttpClient<TwelveDataQuoteProvider>();
 builder.Services.AddHttpClient<FinnhubQuoteProvider>();
+builder.Services.AddHttpClient<EodhdQuoteProvider>();
+builder.Services.AddHttpClient<CurrencyConversionService>();
 builder.Services.AddSingleton<IQuoteProvider>(services => services.GetRequiredService<TwelveDataQuoteProvider>());
 builder.Services.AddSingleton<IQuoteProvider>(services => services.GetRequiredService<FinnhubQuoteProvider>());
+builder.Services.AddSingleton<IQuoteProvider>(services => services.GetRequiredService<EodhdQuoteProvider>());
 builder.Services.AddSingleton<ProviderRunCsvLogger>();
 builder.Services.AddSingleton<PriceHistoryStore>();
 builder.Services.AddSingleton<PriceUpdateService>();

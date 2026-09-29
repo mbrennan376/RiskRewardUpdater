@@ -34,8 +34,18 @@ public sealed class PriceHistoryStore
             var manifestChanged = false;
             foreach (var chart in catalog.Charts)
             {
+                foreach (var knownSymbol in chart.CurrencyTickerSymbols.Values.Append(chart.TickerSymbol).Distinct(StringComparer.OrdinalIgnoreCase))
+                {
+                    if (manifest.TryGetValue(SafeSymbol(knownSymbol), out var knownEntry) &&
+                        !knownEntry.ChartTickerSymbol.Equals(chart.TickerSymbol, StringComparison.OrdinalIgnoreCase))
+                    {
+                        knownEntry.ChartTickerSymbol = chart.TickerSymbol;
+                        manifestChanged = true;
+                    }
+                }
                 if (!freshQuotes.TryGetValue(chart.TickerSymbol, out var quote) || quote.IsStale || quote.Price <= 0) continue;
-                var symbol = SafeSymbol(MarketMetadata.ActiveSymbol(chart));
+                var activeSymbol = SafeSymbol(MarketMetadata.ActiveSymbol(chart));
+                var symbol = quote.IsDerived ? SafeSymbol(activeSymbol + "-DERIVED") : activeSymbol;
                 var currency = MarketMetadata.NormalizeCurrency(chart.Currency, symbol);
                 var exchange = MarketMetadata.InferExchange(chart.Exchange, symbol);
                 var timestamp = quote.QuotedAt.ToUniversalTime();
@@ -51,11 +61,17 @@ public sealed class PriceHistoryStore
 
                 var file = await ReadHistoryFileAsync(target, path, cancellationToken) ?? new HistoricalPriceFile
                 {
+                    ChartTickerSymbol = chart.TickerSymbol,
                     Symbol = symbol,
+                    IsDerived = quote.IsDerived,
+                    SourceSymbol = quote.SourceSymbol,
                     Currency = currency,
                     Exchange = exchange
                 };
+                file.ChartTickerSymbol = chart.TickerSymbol;
                 file.Symbol = symbol;
+                file.IsDerived = quote.IsDerived;
+                file.SourceSymbol = quote.SourceSymbol;
                 file.Currency = currency;
                 file.Exchange = exchange;
                 var existingIndex = file.Points.FindIndex(point => point.Timestamp == timestamp);
@@ -81,6 +97,9 @@ public sealed class PriceHistoryStore
                 var first = file.Points[0].Timestamp;
                 var last = file.Points[^1].Timestamp;
                 entry ??= new HistoryManifestEntry { First = first, Last = last };
+                entry.ChartTickerSymbol = chart.TickerSymbol;
+                entry.IsDerived = quote.IsDerived;
+                entry.SourceSymbol = quote.SourceSymbol;
                 entry.Currency = currency;
                 entry.Exchange = exchange;
                 if (entry.First == default || first < entry.First) entry.First = first;

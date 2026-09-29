@@ -10,5 +10,6 @@ window.riskRewardHistory=(()=>{
     const points=results.flatMap(file=>file?.points||[]).map(point=>({x:new Date(point[0]),y:Number(point[1])})).filter(point=>Number.isFinite(point.x.getTime())&&Number.isFinite(point.y)&&point.x>=start&&point.x<=end).sort((a,b)=>a.x-b.x);
     return {symbol,currency:entry.currency,exchange:entry.exchange,availableSince:entry.first||null,points};
   }
-  return {load,has:async symbol=>Boolean((await manifest())[String(symbol).toUpperCase()])};
+  async function seriesFor(chartTickerSymbol){const key=String(chartTickerSymbol).toUpperCase(),entries=await manifest();return Object.entries(entries).filter(([,entry])=>String(entry.chartTickerSymbol||'').toUpperCase()===key).map(([symbol,entry])=>({symbol,...entry}));}
+  return {load,has:async symbol=>Boolean((await manifest())[String(symbol).toUpperCase()]),seriesFor};
 })();
