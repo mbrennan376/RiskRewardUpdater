@@ -22,6 +22,7 @@ builder.Services.AddSingleton<IQuoteProvider>(services => services.GetRequiredSe
 builder.Services.AddSingleton<ProviderRunCsvLogger>();
 builder.Services.AddSingleton<PriceHistoryStore>();
 builder.Services.AddSingleton<PriceUpdateService>();
+builder.Services.AddSingleton<BackgroundPriceRefresh>();
 builder.Services.AddHttpClient<OpenAiChartAnalyzer>();
 builder.Services.AddHttpClient<OpenAiChartImageEditor>();
 builder.Services.AddHttpClient<CurrencyConversionService>();
@@ -163,25 +164,16 @@ app.MapPut("/api/charts/{ticker}/image-choice", async (string ticker, ImageChoic
     catch (InvalidOperationException ex) { return Results.BadRequest(new { error = ex.Message }); }
 });
 
-app.MapPost("/api/publish", async (StateStore store, SitePublisher publisher, PriceUpdateService priceUpdater, ILoggerFactory loggerFactory, CancellationToken cancellationToken) =>
+app.MapPost("/api/publish", async (StateStore store, SitePublisher publisher, BackgroundPriceRefresh priceRefresh, CancellationToken cancellationToken) =>
 {
     try
     {
         var target = await store.GetTargetAsync(cancellationToken);
         var publication = await publisher.PublishApprovedAsync(target, cancellationToken);
+        // The price refresh waits out provider rate limits (61 s per Twelve Data batch), so it can take
+        // minutes. Run it in the background and let the page poll /api/prices/refresh-status.
+        priceRefresh.TryStart();
         publication.PriceRefreshAttempted = true;
-        try
-        {
-            var prices = await priceUpdater.UpdateAsync(cancellationToken);
-            publication.FreshPriceCount = prices.FreshCount;
-            publication.TotalPriceCount = prices.TotalCount;
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            publication.PriceRefreshError = ex.Message;
-            loggerFactory.CreateLogger("PublishPriceRefresh").LogError(ex,
-                "Chart publication succeeded, but its immediate price refresh failed.");
-        }
         return Results.Ok(publication);
     }
     catch (Exception ex) when (ex is InvalidOperationException or DirectoryNotFoundException)
@@ -190,8 +182,49 @@ app.MapPost("/api/publish", async (StateStore store, SitePublisher publisher, Pr
     }
 });
 
+app.MapGet("/api/prices/refresh-status", (BackgroundPriceRefresh priceRefresh) => Results.Ok(priceRefresh.Status));
+
 app.MapFallbackToFile("index.html");
 app.Run();
 
 public sealed record TargetRequest(DeploymentTarget Target);
 public sealed record ImageChoiceRequest(bool UseEditedImage);
+public sealed record PriceRefreshStatus(bool Running, DateTimeOffset? StartedAt, DateTimeOffset? CompletedAt, int? FreshCount, int? TotalCount, string? Error);
+
+public sealed class BackgroundPriceRefresh(PriceUpdateService updater, IHostApplicationLifetime lifetime, ILogger<BackgroundPriceRefresh> logger)
+{
+    private readonly object sync = new();
+    private Task running = Task.CompletedTask;
+    public PriceRefreshStatus Status { get; private set; } = new(false, null, null, null, null, null);
+
+    // Starts a refresh unless one is already running; either way the page can poll Status.
+    public bool TryStart()
+    {
+        lock (sync)
+        {
+            if (!running.IsCompleted) return false;
+            Status = new PriceRefreshStatus(true, DateTimeOffset.UtcNow, null, null, null, null);
+            running = Task.Run(RunAsync);
+            return true;
+        }
+    }
+
+    private async Task RunAsync()
+    {
+        var startedAt = Status.StartedAt;
+        try
+        {
+            var prices = await updater.UpdateAsync(lifetime.ApplicationStopping);
+            Status = new PriceRefreshStatus(false, startedAt, DateTimeOffset.UtcNow, prices.FreshCount, prices.TotalCount, null);
+        }
+        catch (OperationCanceledException)
+        {
+            Status = new PriceRefreshStatus(false, startedAt, DateTimeOffset.UtcNow, null, null, "The app stopped before the price refresh finished.");
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Chart publication succeeded, but its price refresh failed.");
+            Status = new PriceRefreshStatus(false, startedAt, DateTimeOffset.UtcNow, null, null, ex.Message);
+        }
+    }
+}

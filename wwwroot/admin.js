@@ -195,7 +195,20 @@ $('ageFilter').addEventListener('change',event=>{state.ageFilter=event.target.va
 window.addEventListener('hashchange',()=>{state.view=location.hash.toLowerCase()==='#ages'?'ages':'review';renderView();if(state.view==='ages')renderAges();});
 $('publish').onclick=async()=>{
   const live=String(state.status.target).toLowerCase()==='live',destination=live?'Live Azure':'the local preview';
-  showMessage(`Publishing approved charts to ${destination}…`);
-  try{const result=await request('/api/publish',{method:'POST',body:'{}'});let confirmation=result.tickers.length?`Published ${result.tickers.length} chart(s) to ${destination}.`:`Published the current site assets and chart catalog to ${destination}.`;if(result.priceRefreshError)confirmation+=` The immediate price refresh failed: ${result.priceRefreshError}`;else if(result.priceRefreshAttempted)confirmation+=` Refreshed ${result.freshPriceCount??0}/${result.totalPriceCount??0} prices.`;await load();showMessage(confirmation,result.priceRefreshError?'error':'success');if(!live)openPreview();alert(confirmation);}catch(error){showMessage(error.message,'error');}
+  showMessage(`Publishing approved charts to ${destination}…`);$('publish').disabled=true;
+  try{const result=await request('/api/publish',{method:'POST',body:'{}'});const confirmation=result.tickers.length?`Published ${result.tickers.length} chart(s) to ${destination}.`:`Published the current site assets and chart catalog to ${destination}.`;await load();showMessage(`${confirmation} Refreshing prices in the background…`,'success');if(!live)openPreview();alert(confirmation);if(result.priceRefreshAttempted)watchPriceRefresh(confirmation);}catch(error){showMessage(error.message,'error');}
+  finally{renderTarget();}
 };
+// The price refresh waits out provider rate limits and can take a few minutes.
+async function watchPriceRefresh(prefix){
+  for(let attempt=0;attempt<120;attempt++){
+    await new Promise(resolve=>setTimeout(resolve,5000));
+    let status;try{status=await request('/api/prices/refresh-status');}catch{continue;}
+    if(status.running)continue;
+    if(status.error)showMessage(`${prefix} The price refresh failed: ${status.error}`,'error');
+    else showMessage(`${prefix} Refreshed ${status.freshCount??0}/${status.totalCount??0} prices.`,'success');
+    return;
+  }
+  showMessage(`${prefix} Prices are still refreshing; rescan later to see them.`);
+}
 renderView();load();
