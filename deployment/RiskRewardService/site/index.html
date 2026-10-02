@@ -2,26 +2,39 @@
 <html lang="en">
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="description" content="Current risk/reward charts and allocation ranges.">
-  <title>Risk/Reward Charts</title><link rel="stylesheet" href="css/styles.css?v=20260924-5"><link rel="stylesheet" href="css/dashboard-fit.css?v=20260923-1"><link rel="stylesheet" href="css/market-status.css?v=20260923-1"><link rel="stylesheet" href="css/navigation.css?v=20260924-1">
+  <meta name="description" content="Current risk/reward charts and personal holding targets.">
+  <title>Risk/Reward Charts</title><link rel="stylesheet" href="css/styles.css?v=20260929-9"><link rel="stylesheet" href="css/dashboard-fit.css?v=20260929-3"><link rel="stylesheet" href="css/market-status.css?v=20260923-1"><link rel="stylesheet" href="css/navigation.css?v=20260924-1">
 </head>
 <body>
   <header class="app-header">
     <div><span class="eyebrow">MONEY MARK CHARTS</span><h1>Risk / Reward</h1></div>
-    <div class="header-status"><span id="marketStatus" class="status-pill">Loading prices</span><button id="menuButton" class="icon-button" aria-expanded="false" aria-controls="siteNavigation">Menu</button></div>
+    <div class="header-status"><span id="marketStatus" class="status-pill">Loading prices</span><span id="portfolioChange" class="status-pill portfolio-change" title="Today’s gain or loss across configured holdings" hidden></span><button id="menuButton" class="icon-button" aria-expanded="false" aria-controls="siteNavigation">Menu</button></div>
   </header>
-  <main class="dashboard">
+  <main id="mainView" class="dashboard">
     <aside class="browser-panel">
       <div class="search-wrap"><label for="search">Find a company</label><input id="search" type="search" placeholder="Ticker or company…" autocomplete="off"></div>
       <div class="list-summary"><span id="resultCount">— charts</span><span>Allocation</span></div>
       <div id="chartList" class="chart-list" role="listbox" aria-label="Risk reward charts"></div>
     </aside>
-    <section id="detail" class="detail-panel" aria-live="polite">
-      <div class="empty-state"><span class="eyebrow">CHART LIBRARY</span><h2>Select a chart</h2><p>Choose a ticker to see its current price and risk/reward position.</p></div>
-    </section>
+    <section id="detail" class="detail-panel" aria-live="polite"><div class="empty-state"><span class="eyebrow">CHART LIBRARY</span><h2>Select a chart</h2><p>Choose a ticker to see its current price and risk/reward position.</p></div></section>
   </main>
-  <dialog id="lightbox"><button id="lightboxClose" class="close-button" aria-label="Close chart">×</button><img id="lightboxImage" alt="Expanded risk/reward chart"></dialog>
-  <script src="js/navigation.js?v=20260924-1" defer></script><script src="js/history.js?v=20260924-2" defer></script><script src="js/scripts.js?v=20260924-8" defer></script>
+  <dialog id="portfolioDialog" class="portfolio-dialog" aria-labelledby="portfolioTitle">
+    <form id="portfolioForm">
+      <header class="dialog-header"><div><span class="eyebrow">LOCAL PORTFOLIO</span><h2 id="portfolioTitle">Portfolio settings</h2></div><button id="portfolioClose" class="close-button" type="button" aria-label="Close portfolio settings">×</button></header>
+      <p class="dialog-intro">Set your portfolio total and alert tolerance. Values are stored only in this browser.</p>
+      <div class="dialog-grid global-fields">
+        <label>Total invested cash<input id="totalInvested" type="number" min="0.01" step="0.01" inputmode="decimal" required placeholder="100000"></label>
+        <label>Portfolio currency<select id="portfolioCurrency" required><option value="USD">USD — US dollar</option><option value="CAD">CAD — Canadian dollar</option></select><small>Current, target, and difference dollars use this currency.</small></label>
+        <label>Alert threshold<select id="alertThresholdPoints" required><option value="1">1 point</option><option value="2">2 points</option><option value="3">3 points</option><option value="4">4 points</option><option value="5">5 points</option><option value="6">6 points</option><option value="7">7 points</option><option value="8">8 points</option><option value="9">9 points</option><option value="10">10 points</option></select><small>Defaults to 3 points on the allocation scale. Holdings inside this range are green; holdings outside it are red.</small></label>
+      </div>
+      <fieldset id="portfolioTickerGroup"><legend id="portfolioTicker">Holding</legend><div class="dialog-grid holding-fields"><label id="holdingListingField">Held symbol<select id="holdingListing" required></select><small>Choose the listing where you own the shares.</small></label><label>Shares held<input id="sharesHeld" type="number" min="0" step="any" inputmode="decimal" required></label><label>Allocation multiplier<select id="holdingMultiplier" required></select><small>0.0× to 2.0× in 0.1 increments.</small></label></div></fieldset>
+      <div class="backup-row"><div><strong>Local backup</strong><small>Export or restore every saved portfolio value as JSON.</small></div><button id="exportPortfolio" class="secondary-button" type="button">Export JSON</button><button id="importPortfolio" class="secondary-button" type="button">Import JSON</button><input id="portfolioImport" type="file" accept="application/json,.json" hidden></div>
+      <p id="portfolioMessage" class="dialog-message" role="status"></p>
+      <div class="dialog-actions"><button class="primary-button" type="submit">Save settings</button></div>
+    </form>
+  </dialog>
+  <dialog id="lightbox" class="lightbox-dialog"><button id="lightboxClose" class="close-button" aria-label="Close chart">×</button><img id="lightboxImage" alt="Expanded risk/reward chart"></dialog>
+  <script src="js/navigation.js?v=20260924-1" defer></script><script src="js/history.js?v=20260924-2" defer></script><script src="js/portfolio.js?v=20260929-6" defer></script><script src="js/scripts.js?v=20260930-12" defer></script>
   <!-- Cloudflare Web Analytics --><script type="module" src="https://static.cloudflareinsights.com/beacon.min.js" data-cf-beacon='{"token":"c464d95088a84f24825ee38646ae8609"}'></script><!-- End Cloudflare Web Analytics -->
 </body>
 </html>

@@ -1,47 +1,28 @@
-const app={charts:[],prices:{},priceGeneratedAt:null,selected:null,query:'',totalInvested:null,storageError:''};
-const totalInvestedStorageKey='riskReward.totalInvestedCash';
+const Portfolio=window.RiskRewardPortfolio;
+const app={charts:[],prices:{},exchangeRates:{},priceGeneratedAt:null,selected:null,query:'',portfolio:Portfolio.empty(),storageError:'',editingChart:null};
 const $=id=>document.getElementById(id);
 const text=(tag,value,className)=>{const node=document.createElement(tag);node.textContent=value;if(className)node.className=className;return node;};
 const money=(value,currency='USD')=>value==null?'—':new Intl.NumberFormat('en-US',{style:'currency',currency,maximumFractionDigits:value<10?3:2}).format(value);
+const portfolioMoney=(value,currency=app.portfolio.portfolioCurrency||'USD')=>value==null?'—':new Intl.NumberFormat('en-US',{style:'currency',currency,maximumFractionDigits:2}).format(value);
+const shares=value=>value==null?'—':new Intl.NumberFormat('en-US',{maximumFractionDigits:4}).format(value);
+const signedShares=value=>value==null?'—':`${value>0?'+':value<0?'−':''}${shares(Math.abs(value))}`;
+const signedPortfolioMoney=value=>value==null?'—':`${value>0?'+':value<0?'−':''}${portfolioMoney(Math.abs(value))}`;
 const dateTime=value=>value?new Intl.DateTimeFormat('en-US',{dateStyle:'medium',timeStyle:'short'}).format(new Date(value)):'Unavailable';
 const finiteOrNull=value=>value==null||value===''?null:(Number.isFinite(Number(value))?Number(value):null);
-const portfolioMoney=value=>value==null?'—':new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',maximumFractionDigits:2}).format(value);
 
-function readStoredTotal(){
-  try{const value=finiteOrNull(localStorage.getItem(totalInvestedStorageKey));return value>0?value:null;}
-  catch{return null;}
-}
-
-function saveStoredTotal(value){
-  try{localStorage.setItem(totalInvestedStorageKey,String(value));app.storageError='';return true;}
-  catch{app.storageError='This browser could not save the amount locally.';return false;}
-}
-
-function clearStoredTotal(){
-  try{localStorage.removeItem(totalInvestedStorageKey);app.storageError='';return true;}
-  catch{app.storageError='This browser could not clear the saved amount.';return false;}
-}
-
-function allocation(price,lower,upper){
-  if(!(price>0&&lower>0&&upper>lower))return null;
-  const raw=(Math.log(upper)-Math.log(price))/(Math.log(upper)-Math.log(lower))*10;
-  return Math.max(0,Math.min(10,raw));
-}
-
-function rawRiskRewardPosition(price,lower,upper){
-  if(!(price>0&&lower>0&&upper>lower))return null;
-  return Math.log(price/lower)/Math.log(upper/lower)*10;
-}
+function loadPortfolio(){try{app.portfolio=Portfolio.load();}catch{app.portfolio=Portfolio.empty();app.storageError='Saved portfolio data could not be read. Import a backup or save new settings.';}}
+function savePortfolio(value){try{app.portfolio=Portfolio.save(value);app.storageError='';return true;}catch{app.storageError='This browser could not save the portfolio settings locally.';return false;}}
+function allocation(price,lower,upper){if(!(price>0&&lower>0&&upper>lower))return null;return Math.max(0,Math.min(10,(Math.log(upper)-Math.log(price))/(Math.log(upper)-Math.log(lower))*10));}
+function rawRiskRewardPosition(price,lower,upper){if(!(price>0&&lower>0&&upper>lower))return null;return Math.log(price/lower)/Math.log(upper/lower)*10;}
 
 async function load(){
   try{
     const selectedTicker=app.selected?.tickerSymbol;
     const [chartResponse,priceResponse]=await Promise.all([fetch(`data.json?v=${Date.now()}`,{cache:'no-store'}),fetch(`prices.json?v=${Date.now()}`,{cache:'no-store'}).catch(()=>null)]);
     if(!chartResponse.ok)throw new Error('Chart catalog could not be loaded.');
-    const catalog=await chartResponse.json();app.charts=normalizeCharts(catalog);
-    if(priceResponse?.ok){const prices=await priceResponse.json();app.prices=prices.quotes||prices;app.priceGeneratedAt=prices.generatedAt??prices.GeneratedAt??null;renderMarketStatus(app.prices,app.priceGeneratedAt);}
-    else{app.prices={};app.priceGeneratedAt=null;renderMarketStatus({},null);}
-    app.selected=app.charts.find(chart=>chart.tickerSymbol===selectedTicker)||app.charts[0]||null;renderList();renderDetail();
+    app.charts=normalizeCharts(await chartResponse.json());
+    if(priceResponse?.ok){const prices=await priceResponse.json();app.prices=prices.quotes||prices;app.exchangeRates=prices.exchangeRates??prices.ExchangeRates??{};app.priceGeneratedAt=prices.generatedAt??prices.GeneratedAt??null;renderMarketStatus(app.prices,app.priceGeneratedAt);}else{app.prices={};app.exchangeRates={};app.priceGeneratedAt=null;renderMarketStatus({},null);}
+    app.selected=app.charts.find(chart=>chart.tickerSymbol===selectedTicker)||app.charts[0]||null;renderAll();
   }catch(error){$('detail').replaceChildren(text('div',error.message,'empty-state'));}
 }
 
@@ -49,89 +30,57 @@ function normalizeCharts(input){
   const rows=Array.isArray(input)?input:(input.charts||[]);
   return rows.map(row=>{const tickerSymbol=row.tickerSymbol??row.TickerSymbol??row['Ticker Symbol']??'',configuredCurrency=String(row.currency??row.Currency??'').trim().toUpperCase(),currency=configuredCurrency==='CAD'||configuredCurrency==='USD'?configuredCurrency:(/\.(V|TO)$/i.test(tickerSymbol)?'CAD':'USD'),currencyTickerSymbols=row.currencyTickerSymbols??row.CurrencyTickerSymbols??{},displayTickerSymbol=currencyTickerSymbols[currency]??currencyTickerSymbols[currency.toLowerCase()]??tickerSymbol;return {tickerSymbol,displayTickerSymbol,currency,currencyTickerSymbols,companyName:row.companyName??row.CompanyName??row['Company Name']??'',updatedDate:row.updatedDate??row.UpdatedDate??row['Updated Date'],chartFilename:row.chartFilename??row.ChartFilename??row['Chart Filename'],comments:row.comments??row.Comments??'',upperLine:Number(row.upperLine??row.UpperLine)||null,lowerLine:Number(row.lowerLine??row.LowerLine)||null};}).sort((a,b)=>a.displayTickerSymbol.localeCompare(b.displayTickerSymbol));
 }
-
 function quoteFor(chart){const quote=app.prices[chart.tickerSymbol]||app.prices[chart.tickerSymbol.toUpperCase()];if(!quote)return null;const currency=String(quote.currency??quote.Currency??'USD').toUpperCase();if(currency!==chart.currency)return null;return {...quote,price:finiteOrNull(quote.price??quote.Price),previousClose:finiteOrNull(quote.previousClose??quote.PreviousClose),dailyChange:finiteOrNull(quote.dailyChange??quote.DailyChange),dailyChangePercent:finiteOrNull(quote.dailyChangePercent??quote.DailyChangePercent),quotedAt:quote.quotedAt??quote.QuotedAt,provider:quote.provider??quote.Provider,isStale:quote.isStale??quote.IsStale,isDerived:quote.isDerived??quote.IsDerived,sourceSymbol:quote.sourceSymbol??quote.SourceSymbol,currency};}
-
-function easternParts(value){
-  return Object.fromEntries(new Intl.DateTimeFormat('en-US',{timeZone:'America/New_York',year:'numeric',month:'2-digit',day:'2-digit',weekday:'short',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).formatToParts(value).filter(part=>part.type!=='literal').map(part=>[part.type,part.value]));
-}
-
+function holdingFor(chart){return app.portfolio.holdings[chart.tickerSymbol.toUpperCase()]||null;}
+function usdCadRate(){const value=app.exchangeRates.USDCAD??app.exchangeRates.usdcad??null;if(!value)return null;return {rate:finiteOrNull(value.rate??value.Rate),effectiveDate:value.effectiveDate??value.EffectiveDate??null,provider:value.provider??value.Provider??'Exchange-rate provider',isStale:(value.isStale??value.IsStale)===true};}
+function listingOptions(chart){const options=[],seen=new Set(),mapped=chart.currencyTickerSymbols||{};for(const code of ['CAD','USD']){const symbol=String(mapped[code]??mapped[code.toLowerCase()]??'').trim().toUpperCase();if(symbol&&!seen.has(`${code}|${symbol}`)){options.push({currency:code,symbol});seen.add(`${code}|${symbol}`);}}const fallback={currency:chart.currency,symbol:chart.displayTickerSymbol||chart.tickerSymbol};if(!seen.has(`${fallback.currency}|${fallback.symbol}`))options.unshift(fallback);return options;}
+function holdingListing(chart,holding=holdingFor(chart)){const options=listingOptions(chart);if(holding?.listingTickerSymbol){const exact=options.find(option=>option.symbol===holding.listingTickerSymbol&&(!holding.listingCurrency||option.currency===holding.listingCurrency));if(exact)return exact;}if(holding?.listingCurrency){const byCurrency=options.find(option=>option.currency===holding.listingCurrency);if(byCurrency)return byCurrency;}return options.find(option=>option.currency===chart.currency)||options[0];}
+function holdingQuoteFor(chart,holding=holdingFor(chart)){const quote=quoteFor(chart);if(!quote)return null;const listing=holdingListing(chart,holding);if(listing.currency===quote.currency)return {...quote,ticker:listing.symbol};const exchange=usdCadRate();if(!exchange?.rate||exchange.isStale)return null;const convert=value=>value==null?null:Portfolio.convert(value,quote.currency,listing.currency,exchange.rate);return {...quote,ticker:listing.symbol,currency:listing.currency,price:convert(quote.price),previousClose:convert(quote.previousClose),dailyChange:convert(quote.dailyChange),isDerived:true,sourceSymbol:chart.displayTickerSymbol};}
+function targetFor(chart){const chartQuote=quoteFor(chart),value=allocation(chartQuote?.price,chart.lowerLine,chart.upperLine),holding=holdingFor(chart),quote=holding?.configured?holdingQuoteFor(chart,holding):chartQuote,exchange=usdCadRate();return Portfolio.calculate({totalInvested:app.portfolio.totalInvested,portfolioCurrency:app.portfolio.portfolioCurrency,allocationPercent:value,price:quote?.price,quoteCurrency:quote?.currency??chart.currency,usdCadRate:exchange?.rate,exchangeRateStale:exchange?.isStale??false,sharesHeld:holding?.sharesHeld??0,multiplier:holding?.multiplier??1,alertThresholdPoints:app.portfolio.alertThresholdPoints,configured:Boolean(holding?.configured)});}
+function conversionRequired(chart){const quote=quoteFor(chart),listing=holdingListing(chart);return Boolean(quote&&(listing.currency!==quote.currency||listing.currency!==app.portfolio.portfolioCurrency));}
+function conversionNote(chart){const quote=quoteFor(chart),listing=holdingListing(chart),exchange=usdCadRate();if(!quote||!conversionRequired(chart))return null;if(!exchange?.rate||exchange.isStale)return `A current USD/CAD rate is unavailable; ${listing.symbol} target calculations are paused.`;const listingNote=listing.currency!==quote.currency?`${listing.symbol} is translated from the ${chart.displayTickerSymbol} chart quote. `:'';return `${listingNote}Converted using 1 USD = ${exchange.rate.toFixed(4)} CAD${exchange.effectiveDate?` (${exchange.effectiveDate})`:''}.`;}
+function holdingSummary(chart){const holding=holdingFor(chart),quote=holdingQuoteFor(chart,holding),exchange=usdCadRate();if(!holding?.configured)return null;if(!quote?.price)return {unavailable:true,holding,quote:quoteFor(chart),listing:holdingListing(chart,holding)};const needsFx=quote.currency!==app.portfolio.portfolioCurrency;if(needsFx&&(!exchange?.rate||exchange.isStale))return {unavailable:true,holding,quote,listing:holdingListing(chart,holding)};const currentAmount=Portfolio.convert(holding.sharesHeld*quote.price,quote.currency,app.portfolio.portfolioCurrency,exchange?.rate);const dailyAmount=quote.dailyChange==null?null:Portfolio.convert(holding.sharesHeld*quote.dailyChange,quote.currency,app.portfolio.portfolioCurrency,exchange?.rate);return {holding,quote,listing:holdingListing(chart,holding),currentAmount,dailyAmount,dailyPercent:quote.dailyChangePercent};}
+function easternParts(value){return Object.fromEntries(new Intl.DateTimeFormat('en-US',{timeZone:'America/New_York',year:'numeric',month:'2-digit',day:'2-digit',weekday:'short',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).formatToParts(value).filter(part=>part.type!=='literal').map(part=>[part.type,part.value]));}
 function dateKey(parts){return `${parts.year}-${parts.month}-${parts.day}`;}
-function previousWeekday(parts){
-  let date=new Date(Date.UTC(Number(parts.year),Number(parts.month)-1,Number(parts.day)));
-  do{date=new Date(date.getTime()-86400000);}while(date.getUTCDay()===0||date.getUTCDay()===6);
-  return date.toISOString().slice(0,10);
-}
-function mostRecentRequiredClose(now=new Date()){
-  const parts=easternParts(now),minutes=Number(parts.hour)*60+Number(parts.minute),weekend=parts.weekday==='Sat'||parts.weekday==='Sun';
-  if(!weekend&&minutes>=16*60)return dateKey(parts);
-  return previousWeekday(parts);
-}
-function hasRequiredCloseUpdate(generatedAt,now=new Date()){
-  if(!generatedAt)return false;
-  const generated=new Date(generatedAt);if(Number.isNaN(generated.getTime()))return false;
-  const parts=easternParts(generated),generatedDate=dateKey(parts),requiredDate=mostRecentRequiredClose(now);
-  return generatedDate>requiredDate||(generatedDate===requiredDate&&Number(parts.hour)*60+Number(parts.minute)>=16*60);
-}
+function previousWeekday(parts){let date=new Date(Date.UTC(Number(parts.year),Number(parts.month)-1,Number(parts.day)));do{date=new Date(date.getTime()-86400000);}while(date.getUTCDay()===0||date.getUTCDay()===6);return date.toISOString().slice(0,10);}
+function mostRecentRequiredClose(now=new Date()){const parts=easternParts(now),minutes=Number(parts.hour)*60+Number(parts.minute),weekend=parts.weekday==='Sat'||parts.weekday==='Sun';if(!weekend&&minutes>=960)return dateKey(parts);return previousWeekday(parts);}
+function hasRequiredCloseUpdate(generatedAt,now=new Date()){if(!generatedAt)return false;const generated=new Date(generatedAt);if(Number.isNaN(generated.getTime()))return false;const parts=easternParts(generated),generatedDate=dateKey(parts),requiredDate=mostRecentRequiredClose(now);return generatedDate>requiredDate||(generatedDate===requiredDate&&Number(parts.hour)*60+Number(parts.minute)>=960);}
+function renderMarketStatus(quotes,generatedAt){const pill=$('marketStatus'),values=Object.values(quotes||{});if(!values.length){pill.textContent='Prices unavailable';pill.className='status-pill stale';return;}const times=values.map(quote=>new Date(quote.quotedAt??quote.QuotedAt??0).getTime()).filter(Number.isFinite),newest=times.length?Math.max(...times):0,explicitlyStale=values.every(quote=>(quote.isStale??quote.IsStale)===true),now=new Date(),current=easternParts(now),minutes=Number(current.hour)*60+Number(current.minute),weekday=current.weekday!=='Sat'&&current.weekday!=='Sun',marketOpen=weekday&&minutes>=570&&minutes<960,stale=explicitlyStale||(marketOpen?(!newest||(Date.now()-newest)/60000>30):!hasRequiredCloseUpdate(generatedAt,now));if(!marketOpen&&!stale){pill.textContent='Market closed';pill.className='status-pill closed';return;}pill.textContent=stale?'Prices may be stale':'Prices current';pill.className=`status-pill ${stale?'stale':'fresh'}`;}
 
-function renderMarketStatus(quotes,generatedAt){
-  const pill=$('marketStatus'),values=Object.values(quotes||{});
-  if(values.length===0){pill.textContent='Prices unavailable';pill.className='status-pill stale';return;}
-  const times=values.map(quote=>new Date(quote.quotedAt??quote.QuotedAt??0).getTime()).filter(Number.isFinite);
-  const newest=times.length?Math.max(...times):0;
-  const explicitlyStale=values.every(quote=>(quote.isStale??quote.IsStale)===true);
-  const now=new Date(),current=easternParts(now),minutes=Number(current.hour)*60+Number(current.minute),weekday=current.weekday!=='Sat'&&current.weekday!=='Sun',marketOpen=weekday&&minutes>=9*60+30&&minutes<16*60;
-  const stale=explicitlyStale||(marketOpen?(!newest||(Date.now()-newest)/60000>30):!hasRequiredCloseUpdate(generatedAt,now));
-  if(!marketOpen&&!stale){pill.textContent='Market closed';pill.className='status-pill closed';return;}
-  pill.textContent=stale?'Prices may be stale':'Prices current';pill.className=`status-pill ${stale?'stale':'fresh'}`;
-}
-
-function renderList(){
-  const filtered=app.charts.filter(c=>`${c.tickerSymbol} ${c.displayTickerSymbol} ${c.companyName}`.toLowerCase().includes(app.query));$('resultCount').textContent=`${filtered.length} chart${filtered.length===1?'':'s'}`;
-  $('chartList').replaceChildren(...filtered.map(chart=>{
-    const quote=quoteFor(chart),value=allocation(quote?.price,chart.lowerLine,chart.upperLine);
-    const button=document.createElement('button');button.className=`chart-row ${app.selected===chart?'active':''}`;button.setAttribute('role','option');button.setAttribute('aria-selected',app.selected===chart);
-    const copy=document.createElement('span');copy.className='row-copy';copy.append(text('strong',chart.displayTickerSymbol),text('small',chart.companyName));
-    button.append(text('span',chart.displayTickerSymbol.slice(0,4),'ticker-mark'),copy,text('span',value==null?'—':`${value.toFixed(1)}%`,'allocation-chip'));
-    button.onclick=()=>{app.selected=chart;renderList();renderDetail();};return button;
-  }));
-}
-
+function renderAll(){renderList();renderDetail();renderPortfolioChange();}
+function holdingOffset(chart){const holding=holdingFor(chart),target=targetFor(chart);if(!holding?.configured||!target)return null;const difference=target.differencePoints,threshold=app.portfolio.alertThresholdPoints,className=Number.isFinite(difference)&&Math.abs(difference)<=threshold?'in-range':'out-of-range';if(!Number.isFinite(difference))return {label:'Out of range',className};if(Math.abs(difference)<.05)return {label:'On target',className};return {label:`${Math.abs(difference).toFixed(1)} pt${Math.abs(difference).toFixed(1)==='1.0'?'':'s'} ${difference>0?'low':'high'}`,className};}
+function renderList(){const filtered=app.charts.filter(c=>`${c.tickerSymbol} ${c.displayTickerSymbol} ${c.companyName}`.toLowerCase().includes(app.query));$('resultCount').textContent=`${filtered.length} chart${filtered.length===1?'':'s'}`;$('chartList').replaceChildren(...filtered.map(chart=>{const quote=quoteFor(chart),value=allocation(quote?.price,chart.lowerLine,chart.upperLine),offset=holdingOffset(chart),button=document.createElement('button');button.className=`chart-row ${app.selected===chart?'active':''}`;button.setAttribute('role','option');button.setAttribute('aria-selected',app.selected===chart);const copy=document.createElement('span');copy.className='row-copy';copy.append(text('strong',chart.displayTickerSymbol),text('small',chart.companyName));const rowMetrics=document.createElement('span');rowMetrics.className='row-metrics';rowMetrics.append(text('span',value==null?'—':`${value.toFixed(1)}%`,'allocation-chip'));if(offset)rowMetrics.append(text('small',offset.label,`holding-offset ${offset.className}`));button.append(text('span',chart.displayTickerSymbol.slice(0,4),'ticker-mark'),copy,rowMetrics);button.onclick=()=>{app.selected=chart;renderList();renderDetail();};return button;}));}
 function renderDetail(){
-  const chart=app.selected;if(!chart)return;
-  const quote=quoteFor(chart),value=allocation(quote?.price,chart.lowerLine,chart.upperLine),rawRiskPosition=rawRiskRewardPosition(quote?.price,chart.lowerLine,chart.upperLine),detail=$('detail');detail.replaceChildren();
-  const header=document.createElement('header');header.className='detail-header';const identity=document.createElement('div');identity.className='identity';identity.append(text('span','RISK / REWARD CHART','eyebrow'),text('h2',chart.displayTickerSymbol),text('p',chart.companyName));
-  const currency=chart.currency||quote?.currency||'USD';const quoteBlock=document.createElement('div');quoteBlock.className='quote-block';const source=quote?.isDerived?`Derived from ${quote.sourceSymbol||'USD listing'} · `:'';const valueRow=document.createElement('div');valueRow.className='quote-value-row';valueRow.append(text('strong',money(quote?.price,currency),'quote-price'));
+  const chart=app.selected,detail=$('detail');if(!chart){detail.replaceChildren(text('div','Select a chart','empty-state'));return;}const quote=quoteFor(chart),value=allocation(quote?.price,chart.lowerLine,chart.upperLine),rawPosition=rawRiskRewardPosition(quote?.price,chart.lowerLine,chart.upperLine);detail.replaceChildren();
+  const header=document.createElement('header');header.className='detail-header';const identity=document.createElement('div');identity.className='identity';identity.append(text('span','RISK / REWARD CHART','eyebrow'),text('h2',chart.displayTickerSymbol),text('p',chart.companyName));const currency=chart.currency||quote?.currency||'USD',quoteBlock=document.createElement('div');quoteBlock.className='quote-block';const source=quote?.isDerived?`Derived from ${quote.sourceSymbol||'USD listing'} · `:'',valueRow=document.createElement('div');valueRow.className='quote-value-row';valueRow.append(text('strong',money(quote?.price,currency),'quote-price'));
   if(quote?.dailyChangePercent!=null){const direction=quote.dailyChangePercent>0?'up':quote.dailyChangePercent<0?'down':'flat',arrow=direction==='up'?'↑':direction==='down'?'↓':'•';valueRow.append(text('span',`${arrow} ${Math.abs(quote.dailyChangePercent).toFixed(2)}%`,`movement-pill ${direction}`));if(quote.dailyChange!=null)valueRow.append(text('span',`${signedMoney(quote.dailyChange,currency)} today`,`daily-change ${direction}`));}
-  quoteBlock.append(valueRow,text('span',quote?`${source}${quote.provider||'Quote'} · ${currency} · ${dateTime(quote.quotedAt)}${quote.isStale?' · stale':''}`:'Current quote unavailable','quote-meta'));header.append(identity,quoteBlock);
-  const metrics=document.createElement('div');metrics.className='metrics';metrics.append(allocationMetric(value,quote?.price,chart.lowerLine,chart.upperLine),riskPositionMetric(rawRiskPosition),metric('Upper line',money(chart.upperLine,currency)),metric('Lower line',money(chart.lowerLine,currency)));
-  detail.append(header,metrics);
-  const frame=document.createElement('div');frame.className='chart-frame';const image=document.createElement('img');image.src=chart.chartFilename;image.alt=`${chart.displayTickerSymbol} risk/reward chart`;image.onclick=()=>openLightbox(image);frame.append(image);detail.append(frame);
-  const meta=document.createElement('div');meta.className='chart-meta';meta.append(text('span',`Chart updated ${chart.updatedDate||'—'}`),text('span','Allocation uses logarithmic price position'));detail.append(meta);if(chart.comments)detail.append(text('p',chart.comments,'comment'));
+  quoteBlock.append(valueRow,text('span',quote?`${source}${quote.provider||'Quote'} · ${currency} · ${dateTime(quote.quotedAt)}${quote.isStale?' · stale':''}`:'Current quote unavailable','quote-meta'));header.append(identity,quoteBlock);const metrics=document.createElement('div');metrics.className='metrics';const holdingTiles=[holdingValueMetric(chart),targetHoldingMetric(chart),holdingDifferenceMetric(chart),holdingChangeMetric(chart)].filter(Boolean),pointsTile=holdingPointsMetric(chart);metrics.append(allocationMetric(chart,value,quote?.price,chart.lowerLine,chart.upperLine),riskPositionMetric(rawPosition));if(pointsTile)metrics.append(pointsTile);metrics.append(metric('Upper line',money(chart.upperLine,currency)),metric('Lower line',money(chart.lowerLine,currency)),...holdingTiles);detail.append(header,metrics);
+  const frame=document.createElement('div');frame.className='chart-frame';const image=document.createElement('img');image.src=chart.chartFilename;image.alt=`${chart.displayTickerSymbol} risk/reward chart`;image.onclick=()=>openLightbox(image);frame.append(image);detail.append(frame);const meta=document.createElement('div');meta.className='chart-meta';meta.append(text('span',`Chart updated ${chart.updatedDate||'—'}`),text('span','Allocation uses logarithmic price position'));detail.append(meta);if(chart.comments)detail.append(text('p',chart.comments,'comment'));
+}
+function metric(label,value){const node=document.createElement('div');node.className='metric';node.append(text('span',label),text('strong',value));return node;}
+function holdingValueMetric(chart){const summary=holdingSummary(chart);if(!summary||summary.unavailable||!(summary.holding.sharesHeld>0)||summary.currentAmount==null)return null;const node=document.createElement('div');node.className='metric holding-metric';node.append(text('span','Total holding'),text('strong',portfolioMoney(summary.currentAmount)),text('small',`${shares(summary.holding.sharesHeld)} shares at ${money(summary.quote.price,summary.quote.currency)}`));return node;}
+function targetHoldingMetric(chart){const holding=holdingFor(chart),target=targetFor(chart);if(!holding?.configured||!target)return null;const node=document.createElement('div');node.className='metric holding-metric';node.append(text('span','Target holding'),text('strong',portfolioMoney(target.targetAmount)),text('small',`${shares(target.targetShares)} shares`));return node;}
+function holdingDifferenceMetric(chart){const holding=holdingFor(chart),target=targetFor(chart);if(!holding?.configured||!target||Math.abs(target.differenceAmount)<.005)return null;const node=document.createElement('div'),direction=target.differenceAmount>0?'up':'down';node.className=`metric holding-difference-metric ${direction}`;node.append(text('span','Difference'),text('strong',signedPortfolioMoney(target.differenceAmount)),text('small',`${signedShares(target.differenceShares)} shares`));return node;}
+function holdingChangeMetric(chart){const summary=holdingSummary(chart);if(!summary||summary.unavailable||!(summary.holding.sharesHeld>0)||summary.dailyAmount==null||summary.dailyPercent==null)return null;const node=document.createElement('div');node.className='metric holding-change-metric';node.append(text('span','Gain / loss today'));const direction=summary.dailyAmount>0?'up':summary.dailyAmount<0?'down':'flat';node.classList.add(direction);node.append(text('strong',signedPortfolioMoney(summary.dailyAmount)),text('small',signedPercent(summary.dailyPercent)));return node;}
+function holdingPointsMetric(chart){const holding=holdingFor(chart),target=targetFor(chart);if(!holding?.configured||!target)return null;const difference=target.differencePoints,threshold=app.portfolio.alertThresholdPoints,node=document.createElement('div');node.className=`metric holding-points-metric ${Number.isFinite(difference)&&Math.abs(difference)<=threshold?'in-range':'out-of-range'}`;node.append(text('span','Points high / low'));if(!Number.isFinite(difference))node.append(text('strong','Out of range'));else if(Math.abs(difference)<.05)node.append(text('strong','On target'));else node.append(text('strong',`${Math.abs(difference).toFixed(1)} ${difference>0?'Low':'High'}`));return node;}
+function riskPositionMetric(rawPosition){const node=document.createElement('div');node.className='metric risk-position-metric';node.append(text('span','Risk/reward position'));const valueRow=document.createElement('div');valueRow.className='risk-position-value';const bounded=rawPosition==null?null:Math.max(0,Math.min(10,rawPosition));if(rawPosition!=null&&(rawPosition<-.000001||rawPosition>10.000001)){const above=rawPosition>10,pill=text('span',above?'Above 10':'Below 0',`range-status ${above?'above':'below'}`);pill.title=above?'Current price is above the upper line':'Current price is below the lower line';valueRow.append(pill);}valueRow.append(text('strong',bounded==null?'—':`${bounded.toFixed(2)} / 10`));node.append(valueRow);return node;}
+function allocationMetric(chart,value,price,lower,upper){
+  const node=document.createElement('div');node.className='metric allocation-metric';node.append(text('span','Suggested allocation','allocation-label'));const copy=document.createElement('div');copy.className='allocation-copy';copy.append(text('strong',value==null?'—':`${value.toFixed(2)}%`),text('small',value==null?'Awaiting price':positionLabel(price,lower,upper)));node.append(copy);
+  if(lower>0&&upper>lower){const track=document.createElement('div');track.className='range-track';if(value!=null){const marker=document.createElement('span');marker.className='range-marker';marker.style.left=`${(10-value)*10}%`;track.append(marker);}const labels=document.createElement('div');labels.className='range-labels';labels.append(text('span','10% · Lower risk'),text('span','0% · Higher risk'));node.append(track,labels);}
+  const personal=document.createElement('div');personal.className='personal-allocation';const holding=holdingFor(chart),target=targetFor(chart),fxNote=conversionNote(chart);if(!target){if(app.portfolio.totalInvested==null)personal.append(text('small','Add total invested cash and this holding to calculate a personal target.'));else if(holding&&conversionRequired(chart))personal.append(text('small',fxNote||'A current currency conversion is unavailable.','storage-error'));else personal.append(text('small','Add shares held and a multiplier to calculate this target.'));}if(fxNote&&target)personal.append(text('small',fxNote,'conversion-note'));const update=text('button',holding?'Update holding':'Set holding','portfolio-update');update.type='button';update.onclick=()=>openPortfolioDialog(chart);personal.append(update,text('small','Saved only in this browser.','local-data-note'));node.append(personal);return node;
 }
 
-function metric(label,value){const node=document.createElement('div');node.className='metric';node.append(text('span',label),text('strong',value));return node;}
-function riskPositionMetric(rawPosition){
-  const node=document.createElement('div');node.className='metric risk-position-metric';node.append(text('span','Risk/reward position'));
-  const valueRow=document.createElement('div');valueRow.className='risk-position-value';const bounded=rawPosition==null?null:Math.max(0,Math.min(10,rawPosition));valueRow.append(text('strong',bounded==null?'—':`${bounded.toFixed(2)} / 10`));
-  if(rawPosition!=null&&(rawPosition<-.000001||rawPosition>10.000001)){const above=rawPosition>10,pill=text('span',above?'Above 10':'Below 0',`range-status ${above?'above':'below'}`);pill.title=above?'Current price is above the upper line':'Current price is below the lower line';valueRow.append(pill);}
-  node.append(valueRow);return node;
-}
-function allocationMetric(value,price,lower,upper){
-  const node=document.createElement('div');node.className='metric allocation-metric';node.append(text('span','Suggested allocation','allocation-label'));
-  const copy=document.createElement('div');copy.className='allocation-copy';copy.append(text('strong',value==null?'—':`${value.toFixed(2)}%`),text('small',value==null?'Awaiting price':positionLabel(price,lower,upper)));node.append(copy);
-  if(lower>0&&upper>lower){const track=document.createElement('div');track.className='range-track';if(value!=null){const marker=document.createElement('span');marker.className='range-marker';marker.style.left=`${(10-value)*10}%`;track.append(marker);}const labels=document.createElement('div');labels.className='range-labels';labels.append(text('span','10% · Lower risk'),text('span','0% · Higher risk'));node.append(track,labels);}
-  const personal=document.createElement('div');personal.className='personal-allocation';
-  if(app.totalInvested!=null){const target=document.createElement('div');target.className='target-investment';target.append(text('span','Target investment'),text('strong',value==null?'—':portfolioMoney(app.totalInvested*value/100)));personal.append(target,text('small',`Based on ${portfolioMoney(app.totalInvested)} total invested cash.`));}
-  const form=document.createElement('form');form.className='portfolio-form';const input=document.createElement('input');input.type='number';input.min='0.01';input.step='0.01';input.inputMode='decimal';input.required=true;input.placeholder='Total invested $';input.setAttribute('aria-label','Total invested cash');input.oninput=()=>input.setCustomValidity('');if(app.totalInvested!=null)input.value=String(app.totalInvested);const save=text('button',app.totalInvested==null?'Save':'Update');save.type='submit';form.append(input,save);
-  if(app.totalInvested!=null){const clear=text('button','Clear','clear-total');clear.type='button';clear.onclick=()=>{if(clearStoredTotal())app.totalInvested=null;renderDetail();};form.append(clear);}
-  form.onsubmit=event=>{event.preventDefault();const amount=finiteOrNull(input.value);if(!(amount>0)){input.setCustomValidity('Enter an amount greater than zero.');input.reportValidity();return;}input.setCustomValidity('');if(saveStoredTotal(amount))app.totalInvested=amount;renderDetail();};
-  personal.append(form,text('small','Saved only in this browser. Never sent to or stored by this site.','local-data-note'));if(app.storageError)personal.append(text('small',app.storageError,'storage-error'));node.append(personal);
-  return node;
-}
+function renderPortfolioChange(){const pill=$('portfolioChange'),entered=app.charts.filter(chart=>{const holding=holdingFor(chart);return holding?.configured&&holding.sharesHeld>0;}),available=entered.map(holdingSummary).filter(summary=>summary&&!summary.unavailable&&summary.dailyAmount!=null&&summary.dailyPercent!=null);pill.className='status-pill portfolio-change';if(!entered.length||available.length!==entered.length){pill.hidden=true;pill.textContent='';return;}const total=available.reduce((sum,summary)=>sum+summary.dailyAmount,0),direction=total>0?'up':total<0?'down':'flat';pill.hidden=false;pill.classList.add(direction);pill.textContent=`Today ${signedPortfolioMoney(total)}`;pill.title=`Today’s gain or loss across ${available.length} configured holding${available.length===1?'':'s'}.`;}
+function openPortfolioDialog(chart=app.selected){app.editingChart=chart||null;const holding=chart?holdingFor(chart):null;$('portfolioTickerGroup').hidden=!chart;$('portfolioTicker').textContent=chart?`${chart.displayTickerSymbol} holding`:'';const listingSelect=$('holdingListing'),options=chart?listingOptions(chart):[];listingSelect.replaceChildren(...options.map(option=>{const node=document.createElement('option');node.value=`${option.currency}|${option.symbol}`;node.textContent=`${option.symbol} — ${option.currency}`;return node;}));$('holdingListingField').hidden=options.length<2;if(chart){const listing=holdingListing(chart,holding);listingSelect.value=`${listing.currency}|${listing.symbol}`;}$('sharesHeld').value=holding?String(holding.sharesHeld):'0';$('holdingMultiplier').value=holding?holding.multiplier.toFixed(1):'1.0';$('totalInvested').value=app.portfolio.totalInvested??'';$('portfolioCurrency').value=app.portfolio.portfolioCurrency||'USD';$('alertThresholdPoints').value=String(app.portfolio.alertThresholdPoints);showPortfolioMessage(app.storageError,Boolean(app.storageError));$('portfolioDialog').showModal();}
+function savePortfolioForm(event){event.preventDefault();const total=finiteOrNull($('totalInvested').value),threshold=finiteOrNull($('alertThresholdPoints').value);if(!(total>0)){showPortfolioMessage('Enter total invested cash greater than zero.',true);$('totalInvested').focus();return;}if(!(threshold>=1&&threshold<=10)){showPortfolioMessage('Choose a threshold from 1 to 10 points.',true);$('alertThresholdPoints').focus();return;}const next=Portfolio.normalize(app.portfolio);next.totalInvested=total;next.portfolioCurrency=$('portfolioCurrency').value;next.alertThresholdPoints=threshold;if(app.editingChart){const held=finiteOrNull($('sharesHeld').value),multiple=finiteOrNull($('holdingMultiplier').value),[listingCurrency,listingTickerSymbol]=$('holdingListing').value.split('|');if(!(held>=0)){showPortfolioMessage('Shares held cannot be negative.',true);$('sharesHeld').focus();return;}next.holdings[app.editingChart.tickerSymbol.toUpperCase()]={sharesHeld:held,multiplier:multiple,configured:true,listingCurrency,listingTickerSymbol};}if(savePortfolio(next)){$('portfolioDialog').close();renderAll();}else showPortfolioMessage(app.storageError,true);}
+function showPortfolioMessage(message,error=false){$('portfolioMessage').textContent=message;$('portfolioMessage').className=`dialog-message ${error?'error':message?'success':''}`;}
+function exportPortfolio(){const data={...app.portfolio,exportedAt:new Date().toISOString()},blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'}),url=URL.createObjectURL(blob),link=document.createElement('a');link.href=url;link.download=`risk-reward-portfolio-${new Date().toISOString().slice(0,10)}.json`;document.body.append(link);link.click();link.remove();URL.revokeObjectURL(url);showPortfolioMessage('Backup downloaded.');}
+async function importPortfolio(event){const file=event.target.files?.[0];event.target.value='';if(!file)return;try{const imported=Portfolio.importJson(await file.text());if(!confirm('Replace the portfolio settings saved in this browser with this backup?'))return;if(savePortfolio(imported)){app.editingChart=null;$('portfolioDialog').close();renderAll();openPortfolioDialog(app.selected);showPortfolioMessage('Backup imported successfully.');}}catch(error){showPortfolioMessage(error instanceof Error?error.message:'The backup could not be imported.',true);}}
 function signedMoney(value,currency){if(value==null)return '';const sign=value>0?'+':value<0?'−':'';return `${sign}${money(Math.abs(value),currency)}`;}
+function signedPercent(value){if(value==null)return '—';const sign=value>0?'+':value<0?'−':'';return `${sign}${Math.abs(value).toFixed(2)}%`;}
 function positionLabel(price,lower,upper){if(!price)return 'Current position unavailable';if(price>=upper)return 'At or above upper line';if(price<=lower)return 'At or below lower line';return 'Inside risk/reward range';}
 function openLightbox(image){$('lightboxImage').src=image.src;$('lightboxImage').alt=image.alt;$('lightbox').showModal();}
-$('lightboxClose').onclick=()=>$('lightbox').close();$('lightbox').onclick=event=>{if(event.target===$('lightbox'))$('lightbox').close();};
-$('search').addEventListener('input',event=>{app.query=event.target.value.trim().toLowerCase();renderList();});
-app.totalInvested=readStoredTotal();load();setInterval(load,15*60*1000);
+
+$('lightboxClose').onclick=()=>$('lightbox').close();$('lightbox').onclick=event=>{if(event.target===$('lightbox'))$('lightbox').close();};$('search').addEventListener('input',event=>{app.query=event.target.value.trim().toLowerCase();renderList();});$('portfolioForm').onsubmit=savePortfolioForm;$('portfolioClose').onclick=()=>$('portfolioDialog').close();$('exportPortfolio').onclick=exportPortfolio;$('importPortfolio').onclick=()=>$('portfolioImport').click();$('portfolioImport').onchange=importPortfolio;
+for(let value=0;value<=20;value++){const option=document.createElement('option');option.value=(value/10).toFixed(1);option.textContent=`${(value/10).toFixed(1)}×`;$('holdingMultiplier').append(option);}
+loadPortfolio();load();setInterval(load,15*60*1000);

@@ -68,3 +68,24 @@ Install from an elevated PowerShell session with `scripts\install-price-service.
 ## Calculation
 
 Suggested allocation is logarithmic: `10 × (ln(upper) - ln(price)) / (ln(upper) - ln(lower))`, clamped to 0–10%. The geometric midpoint is therefore 5%.
+
+## Browser-local portfolio targets
+
+The public dashboard’s holding popup stores a total invested amount, its USD or CAD portfolio currency, a global 1–10 point alert threshold, and each configured ticker’s held shares and allocation multiplier in browser `localStorage`. Multipliers run from 0.0× through 2.0× in 0.1 increments. Existing users’ `riskReward.totalInvestedCash` value is migrated into the versioned `riskReward.portfolio.v1` record the first time the updated dashboard loads, defaulting its currency to USD.
+
+For each configured ticker:
+
+- Expected investment is `total invested × suggested allocation ÷ 100`.
+- Target holding value is `expected investment × multiplier`.
+- Cross-listed Canadian companies let the user choose the exact US or Canadian symbol held. The chart quote is translated with the published USD/CAD rate before current value, target shares, and differences are calculated for that listing.
+- The global alert threshold defaults to 3 allocation-scale points and can be selected from 1 through 10 points. Legacy percentage tolerances are divided by 10, rounded to the nearest point, clamped to 1–10, and persisted the first time they are loaded.
+- The Actions required table includes a compact chart thumbnail that opens the existing full-screen chart viewer.
+- Configured holdings show an `X% low`, `X% high`, or `On target` indicator in the main chart list, based on current holding value versus the multiplier-adjusted target.
+- Target shares is `target holding value converted to the quote currency ÷ current quote`.
+- Current allocation points equal `(current holding value / total invested / multiplier) × 100`. The left chart list shows the difference between suggested allocation points and current allocation points, colored green inside the selected threshold and red outside it. A nonzero holding against a 0.0× target is always outside the range.
+
+`prices.json` schema version 2 publishes a dated `exchangeRates.USDCAD` record from the Bank of Canada. When a quote differs from the selected portfolio currency, target value is converted into quote currency before calculating shares, while current holding value is converted back into portfolio currency for Current / Target / Difference. If rate refresh fails, the previous published rate is retained with `isStale: true`; the browser pauses cross-currency target calculations until a fresh rate is available.
+
+Each chart’s Set holding or Update holding button opens the local settings popup. Calculations require a usable current quote and configured holding; displayed share quantities are rounded, but target calculations use full precision.
+
+Portfolio data is never sent to the server. **Export JSON** downloads all saved portfolio values, including portfolio currency, and **Import JSON** validates and replaces the current browser-local record after confirmation.
