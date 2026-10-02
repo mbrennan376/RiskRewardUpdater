@@ -104,10 +104,19 @@ public sealed record Quote(
 
 public sealed class PriceCatalog
 {
-    public int SchemaVersion { get; set; } = 1;
+    public int SchemaVersion { get; set; } = 2;
     public DateTimeOffset GeneratedAt { get; set; } = DateTimeOffset.UtcNow;
     public Dictionary<string, Quote> Quotes { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+    public Dictionary<string, PublishedExchangeRate> ExchangeRates { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 }
+
+public sealed record PublishedExchangeRate(
+    string From,
+    string To,
+    decimal Rate,
+    DateOnly EffectiveDate,
+    string Provider,
+    bool IsStale = false);
 
 public sealed record HistoricalPricePoint(DateTimeOffset Timestamp, decimal Price);
 

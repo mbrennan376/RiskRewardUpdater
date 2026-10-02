@@ -156,12 +156,38 @@ public sealed class PriceUpdateService
             if (previous.Quotes.TryGetValue(chart.TickerSymbol, out var old) && MarketMetadata.QuoteMatchesChartCurrency(chart, old))
                 quotes[chart.TickerSymbol] = old with { IsStale = true, Error = "All quote providers failed." };
         }
-        await WritePricesAsync(target, new PriceCatalog { GeneratedAt = DateTimeOffset.UtcNow, Quotes = quotes }, cancellationToken);
+        var exchangeRates = await GetPublishedExchangeRatesAsync(previous, cancellationToken);
+        await WritePricesAsync(target, new PriceCatalog { GeneratedAt = DateTimeOffset.UtcNow, Quotes = quotes, ExchangeRates = exchangeRates }, cancellationToken);
         try { await history.UpdateAsync(target, catalog, freshQuotes, cancellationToken); }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
         catch (Exception ex) { logger.LogError(ex, "Current prices were published, but the history update failed and will be retried on a later run."); }
         logger.LogInformation("Published {Count}/{Total} prices to {Target}, including {FreshCount} fresh quotes; primary provider was {Provider}.", quotes.Count, catalog.Charts.Count, target, freshCount, primary.Name);
         return new PriceUpdateResult(freshCount, catalog.Charts.Count, target);
+    }
+
+    private async Task<Dictionary<string, PublishedExchangeRate>> GetPublishedExchangeRatesAsync(
+        PriceCatalog previous,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var rate = await currencyConversion.GetRateAsync("USD", "CAD", cancellationToken);
+            return new Dictionary<string, PublishedExchangeRate>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["USDCAD"] = new(rate.From, rate.To, rate.Rate, rate.EffectiveDate, rate.Provider)
+            };
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+        catch (Exception ex) when (ex is HttpRequestException or JsonException or InvalidOperationException or TaskCanceledException)
+        {
+            logger.LogWarning(ex, "The USD/CAD portfolio conversion rate could not be refreshed.");
+            if (previous.ExchangeRates.TryGetValue("USDCAD", out var old))
+                return new Dictionary<string, PublishedExchangeRate>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["USDCAD"] = old with { IsStale = true }
+                };
+            return new Dictionary<string, PublishedExchangeRate>(StringComparer.OrdinalIgnoreCase);
+        }
     }
 
     private async Task AddDerivedCadFallbacksAsync(
