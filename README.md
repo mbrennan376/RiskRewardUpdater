@@ -86,6 +86,6 @@ For each configured ticker:
 
 `prices.json` schema version 2 publishes a dated `exchangeRates.USDCAD` record from the Bank of Canada. When a quote differs from the selected portfolio currency, target value is converted into quote currency before calculating shares, while current holding value is converted back into portfolio currency for Current / Target / Difference. If rate refresh fails, the previous published rate is retained with `isStale: true`; the browser pauses cross-currency target calculations until a fresh rate is available.
 
-Each chart’s Set holding or Update holding button opens the local settings popup. Calculations require a usable current quote and configured holding; displayed share quantities are rounded, but target calculations use full precision.
+The Portfolio button in the header opens portfolio-wide settings and backup controls. Each chart’s Set holding or Update holding button opens a separate holding popup. Calculations require a usable current quote and configured holding; displayed share quantities are rounded, but target calculations use full precision.
 
 Portfolio data is never sent to the server. **Export JSON** downloads all saved portfolio values, including portfolio currency, and **Import JSON** validates and replaces the current browser-local record after confirmation.
