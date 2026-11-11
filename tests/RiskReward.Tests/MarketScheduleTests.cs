@@ -55,4 +55,65 @@ public sealed class MarketScheduleTests
         Assert.Equal(expected, MarketSchedule.IsCurrentMarketSession(
             DateTimeOffset.Parse(observation), DateTimeOffset.Parse(now)));
     }
+
+    // 2026-11-11 is a Wednesday in Eastern Standard Time (UTC-5).
+    [Theory]
+    [InlineData("2026-11-10T21:00:00Z", "2026-11-11T20:15:00Z", true)]   // yesterday's close at 3:15 PM
+    [InlineData("2026-11-11T16:15:00Z", "2026-11-11T20:15:00Z", false)]  // traded this morning
+    [InlineData("2026-11-10T21:00:00Z", "2026-11-11T14:45:00Z", false)]  // first hour: no trade yet is normal
+    [InlineData("2026-11-09T21:00:00Z", "2026-11-11T14:45:00Z", true)]   // first hour, but two sessions old
+    [InlineData("2026-11-10T21:00:00Z", "2026-11-11T13:00:00Z", false)]  // before the open
+    [InlineData("2026-11-10T21:00:00Z", "2026-11-11T21:30:00Z", true)]   // after today's close
+    [InlineData("2026-11-06T21:00:00Z", "2026-11-07T15:00:00Z", false)]  // weekend uses Friday's close
+    public void FlagsQuotesFromAnEarlierSession(string observation, string now, bool expected)
+    {
+        Assert.Equal(expected, MarketSchedule.IsLaggingQuote(
+            DateTimeOffset.Parse(observation), DateTimeOffset.Parse(now)));
+    }
+
+    [Fact]
+    public void TreatsMidnightUtcStampAsThatDatesClose()
+    {
+        Assert.Equal(DateTimeOffset.Parse("2026-11-10T16:00:00-05:00"),
+            MarketSchedule.NormalizeDateOnlyTimestamp(DateTimeOffset.Parse("2026-11-10T00:00:00Z")));
+        var intraday = DateTimeOffset.Parse("2026-11-11T19:10:20Z");
+        Assert.Equal(intraday, MarketSchedule.NormalizeDateOnlyTimestamp(intraday));
+    }
+
+    [Theory]
+    [InlineData("2026-11-11T09:30:00-05:00", false)]
+    [InlineData("2026-11-11T10:02:00-05:00", true)]   // a slow primary pass still lands in the 10:00 slot
+    [InlineData("2026-11-11T10:15:00-05:00", false)]
+    [InlineData("2026-11-11T10:45:00-05:00", true)]
+    [InlineData("2026-11-11T14:30:00-05:00", true)]
+    [InlineData("2026-11-11T15:45:00-05:00", false)]
+    [InlineData("2026-11-11T16:00:00-05:00", true)]   // the close is always fetched
+    [InlineData("2026-11-11T08:00:00-05:00", true)]   // startup refresh outside the session
+    [InlineData("2026-11-14T11:00:00-05:00", true)]   // weekend
+    public void SpreadsTwentyEodhdCallsForTwoSymbolsAcrossTheSession(string eastern, bool expected)
+    {
+        Assert.Equal(expected, EodhdBudget.AllowsCycle(DateTimeOffset.Parse(eastern), 2, 20));
+    }
+
+    [Fact]
+    public void EodhdBudgetNeverExceedsTheDailyLimitInOneSession()
+    {
+        var open = DateTimeOffset.Parse("2026-11-11T09:30:00-05:00");
+        foreach (var symbols in new[] { 1, 2, 3, 4, 7, 20 })
+        {
+            var cycles = Enumerable.Range(0, 27).Count(slot => EodhdBudget.AllowsCycle(open.AddMinutes(slot * 15), symbols, 20));
+            Assert.InRange(cycles, 1, 27);
+            Assert.True(cycles * symbols <= 20, $"{symbols} symbols used {cycles * symbols} calls");
+        }
+    }
+
+    [Fact]
+    public void EodhdBudgetIsNotRationedOnAnUnlimitedPlan()
+    {
+        var open = DateTimeOffset.Parse("2026-11-11T09:30:00-05:00");
+        Assert.True(EodhdBudget.IsUnlimited(0, 4));
+        Assert.True(EodhdBudget.IsUnlimited(100_000, 4));
+        Assert.False(EodhdBudget.IsUnlimited(20, 2));
+        Assert.All(Enumerable.Range(0, 27), slot => Assert.True(EodhdBudget.AllowsCycle(open.AddMinutes(slot * 15), 4, 0)));
+    }
 }

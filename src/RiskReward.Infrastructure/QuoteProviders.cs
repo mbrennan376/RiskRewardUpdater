@@ -147,7 +147,9 @@ public sealed class FinnhubQuoteProvider : IQuoteProvider
                 if (!document.RootElement.TryGetProperty("c", out var current) || current.GetDecimal() <= 0) continue;
                 long unix = 0;
                 var suppliedTimestamp = document.RootElement.TryGetProperty("t", out var time) && time.TryGetInt64(out unix) && unix > 0;
-                var timestamp = suppliedTimestamp ? DateTimeOffset.FromUnixTimeSeconds(unix) : DateTimeOffset.UtcNow;
+                var timestamp = suppliedTimestamp
+                    ? MarketSchedule.NormalizeDateOnlyTimestamp(DateTimeOffset.FromUnixTimeSeconds(unix))
+                    : DateTimeOffset.UtcNow;
                 var price = current.GetDecimal();
                 var previousClose = ReadDecimal(document.RootElement, "pc");
                 var change = ReadDecimal(document.RootElement, "d");

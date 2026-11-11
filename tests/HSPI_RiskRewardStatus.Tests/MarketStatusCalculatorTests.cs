@@ -47,6 +47,35 @@ namespace HSPI_RiskRewardStatus.Tests
             AssertStatus(Catalog(Utc(2026, 9, 25, 20, 5), Utc(2026, 9, 25, 20, 5)), now, 3, "Market closed");
         }
 
+        [Fact]
+        public void SomeStaleQuotesDuringMarketHoursWarnAndNameThem()
+        {
+            var now = Utc(2026, 11, 11, 20, 15);
+            var catalog = Catalog(now, now.AddMinutes(-1));
+            catalog.Quotes["ITMSF"] = new PriceQuote { QuotedAt = Utc(2026, 11, 10, 21, 0), IsStale = true };
+            catalog.Quotes["DBOXF"] = new PriceQuote { QuotedAt = Utc(2026, 11, 10, 21, 0), IsStale = true };
+            AssertStatus(catalog, now, 1, "2 of 3 prices stale: DBOXF, ITMSF");
+        }
+
+        [Fact]
+        public void SomeStaleQuotesAfterTheCloseStillWarn()
+        {
+            var now = Utc(2026, 11, 11, 21, 40);
+            var catalog = Catalog(Utc(2026, 11, 11, 21, 0), Utc(2026, 11, 11, 21, 0));
+            catalog.Quotes["DBOXF"] = new PriceQuote { QuotedAt = Utc(2026, 11, 10, 21, 0), IsStale = true };
+            AssertStatus(catalog, now, 1, "1 of 2 prices stale: DBOXF");
+        }
+
+        [Fact]
+        public void LongStaleListIsShortened()
+        {
+            var now = Utc(2026, 11, 11, 20, 15);
+            var catalog = Catalog(now, now.AddMinutes(-1));
+            foreach (var ticker in new[] { "F", "E", "D", "C", "B", "A" })
+                catalog.Quotes[ticker] = new PriceQuote { QuotedAt = Utc(2026, 11, 10, 21, 0), IsStale = true };
+            AssertStatus(catalog, now, 1, "6 of 7 prices stale: A, B, C, D, +2");
+        }
+
         private static PriceCatalog Catalog(DateTimeOffset generatedAt, DateTimeOffset quotedAt)
         {
             return new PriceCatalog

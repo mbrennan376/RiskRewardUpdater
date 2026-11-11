@@ -54,6 +54,16 @@ namespace HSPI_RiskRewardStatus
             }
 
             if (stale) return Status(1, "Prices may be stale");
+
+            // The price service marks a quote stale when no provider has a current-session price for it.
+            // Some stale symbols is still a warning, even though the rest of the site is current.
+            var staleTickers = catalog.Quotes.Where(pair => pair.Value != null && pair.Value.IsStale)
+                .Select(pair => pair.Key).OrderBy(ticker => ticker, StringComparer.OrdinalIgnoreCase).ToList();
+            if (staleTickers.Count > 0)
+            {
+                var names = string.Join(", ", staleTickers.Take(4)) + (staleTickers.Count > 4 ? ", +" + (staleTickers.Count - 4) : "");
+                return Status(1, staleTickers.Count + " of " + quotes.Count + " prices stale: " + names);
+            }
             return marketOpen ? Status(2, "Prices current") : Status(3, "Market closed");
         }
 

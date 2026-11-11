@@ -19,6 +19,11 @@ public sealed class ProviderOptions
     public string? EodhdApiKey { get; set; }
     public int RequestTimeoutSeconds { get; set; } = 20;
     public int FinnhubCycleTimeoutSeconds { get; set; } = 45;
+    /// <summary>
+    /// EODHD calls allowed per day (one per symbol). The free plan allows 20; the service spreads them
+    /// across the trading session. Set 0 for a paid plan with no practical limit.
+    /// </summary>
+    public int EodhdDailyCallLimit { get; set; } = 20;
 }
 
 public sealed class OpenAiOptions

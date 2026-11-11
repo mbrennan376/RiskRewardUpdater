@@ -4,9 +4,9 @@
     <TargetFramework>net462</TargetFramework>
     <AssemblyName>HSPI_RiskRewardStatus</AssemblyName>
     <RootNamespace>HSPI_RiskRewardStatus</RootNamespace>
-    <Version>1.0.0.1</Version>
-    <AssemblyVersion>1.0.0.1</AssemblyVersion>
-    <FileVersion>1.0.0.1</FileVersion>
+    <Version>1.0.0.2</Version>
+    <AssemblyVersion>1.0.0.2</AssemblyVersion>
+    <FileVersion>1.0.0.2</FileVersion>
     <LangVersion>latest</LangVersion>
     <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
     <GenerateBindingRedirectsOutputType>true</GenerateBindingRedirectsOutputType>

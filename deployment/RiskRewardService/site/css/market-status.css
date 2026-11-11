@@ -3,3 +3,22 @@
   color: #a9c6e8;
   background: #101c2b;
 }
+
+/* A quote the price service could not refresh in the current trading session. */
+.row-copy small.price-old-tag {
+  color: #edc378;
+  font-weight: 700;
+}
+
+.quote-block span.quote-old {
+  display: block;
+  max-width: 34rem;
+  margin-top: 8px;
+  border: 1px solid #775b2c;
+  border-radius: 9px;
+  padding: 7px 10px;
+  color: #edc378;
+  background: #261e10;
+  font-size: .76rem;
+  line-height: 1.35;
+}
