@@ -31,6 +31,24 @@ public sealed class EodhdQuoteProviderTests
         Assert.Contains("api_token=test-key", handler.LastRequest.RequestUri.Query);
     }
 
+    [Fact]
+    public async Task RequestsUsListingsWithTheUsExchangeCode()
+    {
+        var handler = new StubHandler("""
+            {"code":"DBOXF.US","timestamp":1794428940,"gmtoffset":0,"open":0.52,"high":0.64,"low":0.52,"close":0.604,"volume":324301,"previousClose":0.7525,"change":-0.1485,"change_p":-19.7342}
+            """);
+        var provider = new EodhdQuoteProvider(new HttpClient(handler),
+            Options.Create(new ProviderOptions { EodhdApiKey = "test-key" }));
+
+        var quotes = await provider.GetQuotesAsync(new Dictionary<string, string> { ["DBOXF"] = "DBOXF" });
+
+        var quote = Assert.Single(quotes).Value;
+        Assert.Equal(0.604m, quote.Price);
+        Assert.Equal("USD", quote.Currency);
+        Assert.Equal(DateTimeOffset.FromUnixTimeSeconds(1794428940), quote.QuotedAt);
+        Assert.EndsWith("/DBOXF.US", handler.LastRequest!.RequestUri!.AbsolutePath);
+    }
+
     private sealed class StubHandler(string json) : HttpMessageHandler
     {
         public HttpRequestMessage? LastRequest { get; private set; }

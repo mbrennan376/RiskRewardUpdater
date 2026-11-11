@@ -201,6 +201,8 @@ public sealed class EodhdQuoteProvider : IQuoteProvider
             try
             {
                 var symbol = pair.Value.Trim().ToUpperInvariant();
+                // EODHD symbols are SYMBOL.EXCHANGE; US listings, including OTC, use the US exchange code.
+                if (!symbol.Contains('.')) symbol += ".US";
                 using var response = await http.GetAsync(
                     $"https://eodhd.com/api/real-time/{Uri.EscapeDataString(symbol)}?api_token={Uri.EscapeDataString(options.EodhdApiKey)}&fmt=json",
                     cancellationToken);
