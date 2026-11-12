@@ -72,6 +72,16 @@ public sealed class MarketScheduleTests
     }
 
     [Fact]
+    public void OpeningGraceCanBeTurnedOffForProvidersWithSameDayQuotes()
+    {
+        var yesterdayClose = DateTimeOffset.Parse("2026-11-11T21:00:00Z");
+        var firstHour = DateTimeOffset.Parse("2026-11-12T14:54:00Z"); // 9:54 AM Eastern
+        Assert.False(MarketSchedule.IsLaggingQuote(yesterdayClose, firstHour));
+        Assert.True(MarketSchedule.IsLaggingQuote(yesterdayClose, firstHour, allowOpeningGrace: false));
+        Assert.False(MarketSchedule.IsLaggingQuote(DateTimeOffset.Parse("2026-11-12T14:40:00Z"), firstHour, allowOpeningGrace: false));
+    }
+
+    [Fact]
     public void TreatsMidnightUtcStampAsThatDatesClose()
     {
         Assert.Equal(DateTimeOffset.Parse("2026-11-10T16:00:00-05:00"),

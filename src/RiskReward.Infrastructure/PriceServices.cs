@@ -56,11 +56,12 @@ public static class MarketSchedule
     /// published as old, not as a fresh quote. During the first hour of a session yesterday's last
     /// trade is still accepted, because thinly traded listings may not have traded yet.
     /// </summary>
-    public static bool IsLaggingQuote(DateTimeOffset observation, DateTimeOffset utcNow)
+    public static bool IsLaggingQuote(DateTimeOffset observation, DateTimeOffset utcNow, bool allowOpeningGrace = true)
     {
         var expected = TimeZoneInfo.ConvertTime(EffectiveQuoteTime(utcNow), Eastern).Date;
         var observed = TimeZoneInfo.ConvertTime(observation, Eastern).Date;
         if (observed >= expected) return false;
+        if (!allowOpeningGrace) return true;
 
         var easternNow = TimeZoneInfo.ConvertTime(utcNow, Eastern);
         var weekday = easternNow.DayOfWeek is not DayOfWeek.Saturday and not DayOfWeek.Sunday;
@@ -211,10 +212,13 @@ public sealed class PriceUpdateService
         {
             var missing = catalog.Charts.Where(chart => !quotes.ContainsKey(chart.TickerSymbol)).ToList();
             // A quote from an earlier session is not an answer: ask the next provider for a newer one.
+            // An unrationed EODHD is asked from the opening bell; the other providers only after the first
+            // hour, when yesterday's last trade stops being normal for a thinly traded listing.
+            var askFromTheOpen = IsEodhd(provider) && EodhdBudget.IsUnlimited(eodhdDailyCallLimit, catalog.Charts.Count);
             var lagging = catalog.Charts.Where(chart => quotes.TryGetValue(chart.TickerSymbol, out var held) &&
-                MarketSchedule.IsLaggingQuote(held.QuotedAt, now)).ToList();
+                MarketSchedule.IsLaggingQuote(held.QuotedAt, now, allowOpeningGrace: !askFromTheOpen)).ToList();
             var wanted = missing.Concat(lagging).ToList();
-            if (wanted.Count == 0) break;
+            if (wanted.Count == 0) continue;
             if (IsEodhd(provider))
             {
                 // Listings that have an old quote only go to EODHD when its allowance covers every cycle.
