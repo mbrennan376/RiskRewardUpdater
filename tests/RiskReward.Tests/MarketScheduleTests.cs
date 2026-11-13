@@ -105,6 +105,26 @@ public sealed class MarketScheduleTests
         Assert.Equal(expected, EodhdBudget.AllowsCycle(DateTimeOffset.Parse(eastern), 2, 20));
     }
 
+    [Theory]
+    [InlineData("2026-11-13T09:30:00-05:00", true)]
+    [InlineData("2026-11-13T09:35:00-05:00", true)]
+    [InlineData("2026-11-13T09:37:00-05:00", false)]
+    [InlineData("2026-11-13T16:00:00-05:00", true)]
+    [InlineData("2026-11-13T16:05:00-05:00", false)]
+    [InlineData("2026-11-14T10:00:00-05:00", false)]
+    public void IdentifiesFiveMinuteSlots(string eastern, bool expected)
+    {
+        Assert.Equal(expected, MarketSchedule.IsPollingSlot(DateTimeOffset.Parse(eastern), 5));
+    }
+
+    [Fact]
+    public void RationedEodhdSpendsOnlyOncePerQuarterHourWithFiveMinuteCycles()
+    {
+        Assert.True(EodhdBudget.AllowsCycle(DateTimeOffset.Parse("2026-11-11T10:00:00-05:00"), 2, 20));
+        Assert.False(EodhdBudget.AllowsCycle(DateTimeOffset.Parse("2026-11-11T10:05:00-05:00"), 2, 20));
+        Assert.False(EodhdBudget.AllowsCycle(DateTimeOffset.Parse("2026-11-11T10:10:00-05:00"), 2, 20));
+    }
+
     [Fact]
     public void EodhdBudgetNeverExceedsTheDailyLimitInOneSession()
     {

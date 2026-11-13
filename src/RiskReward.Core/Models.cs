@@ -100,7 +100,8 @@ public sealed record Quote(
     string? ConversionProvider = null,
     decimal? PreviousClose = null,
     decimal? DailyChange = null,
-    decimal? DailyChangePercent = null);
+    decimal? DailyChangePercent = null,
+    bool IsEndOfDayOnly = false);
 
 public sealed class PriceCatalog
 {

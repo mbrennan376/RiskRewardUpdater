@@ -24,6 +24,11 @@ public sealed class ProviderOptions
     /// across the trading session. Set 0 for a paid plan with no practical limit.
     /// </summary>
     public int EodhdDailyCallLimit { get; set; } = 20;
+    /// <summary>
+    /// Minutes between price cycles during the trading session (a divisor of 60, such as 1, 5 or 15).
+    /// Five minutes stays well inside Finnhub's 60 calls a minute and EODHD's paid allowance.
+    /// </summary>
+    public int CycleMinutes { get; set; } = 5;
 }
 
 public sealed class OpenAiOptions

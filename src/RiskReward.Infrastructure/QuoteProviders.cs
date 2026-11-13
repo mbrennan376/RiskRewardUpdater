@@ -147,6 +147,9 @@ public sealed class FinnhubQuoteProvider : IQuoteProvider
                 if (!document.RootElement.TryGetProperty("c", out var current) || current.GetDecimal() <= 0) continue;
                 long unix = 0;
                 var suppliedTimestamp = document.RootElement.TryGetProperty("t", out var time) && time.TryGetInt64(out unix) && unix > 0;
+                // A midnight-UTC stamp is a date, not a trade time: Finnhub only has an end-of-day price
+                // for this listing (US OTC on the free plan).
+                var endOfDayOnly = suppliedTimestamp && DateTimeOffset.FromUnixTimeSeconds(unix).UtcDateTime.TimeOfDay == TimeSpan.Zero;
                 var timestamp = suppliedTimestamp
                     ? MarketSchedule.NormalizeDateOnlyTimestamp(DateTimeOffset.FromUnixTimeSeconds(unix))
                     : DateTimeOffset.UtcNow;
@@ -158,7 +161,8 @@ public sealed class FinnhubQuoteProvider : IQuoteProvider
                     Currency: SymbolCurrency(pair.Value), TimestampIsProviderSupplied: suppliedTimestamp,
                     PreviousClose: previousClose > 0 ? previousClose : null,
                     DailyChange: previousClose > 0 ? change : null,
-                    DailyChangePercent: previousClose > 0 ? changePercent : null);
+                    DailyChangePercent: previousClose > 0 ? changePercent : null,
+                    IsEndOfDayOnly: endOfDayOnly);
             }
             catch (HttpRequestException) { /* Missing quotes are retried through the fallback provider. */ }
             catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested) { /* Keep the whole provider pass bounded. */ }

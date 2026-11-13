@@ -11,10 +11,10 @@ public static class MarketSchedule
 {
     private static readonly TimeZoneInfo Eastern = TimeZoneInfo.FindSystemTimeZoneById("Eastern Standard Time");
 
-    public static bool IsPollingSlot(DateTimeOffset easternTime) =>
+    public static bool IsPollingSlot(DateTimeOffset easternTime, int slotMinutes = 15) =>
         easternTime.DayOfWeek is not DayOfWeek.Saturday and not DayOfWeek.Sunday &&
         easternTime.TimeOfDay >= new TimeSpan(9, 30, 0) && easternTime.TimeOfDay <= new TimeSpan(16, 0, 0) &&
-        easternTime.Minute % 15 == 0;
+        easternTime.Minute % Math.Clamp(slotMinutes, 1, 30) == 0;
 
     public static string SlotKey(DateTimeOffset easternTime) => easternTime.ToString("yyyy-MM-dd-HH-mm");
 
@@ -111,7 +111,10 @@ public static class EodhdBudget
 
         // One cycle is held back so a service restart does not cost the closing quote.
         var cycles = Math.Max(1, dailyCallLimit / Math.Max(1, symbolsPerCycle) - 1);
-        var slot = Math.Clamp((int)((easternNow.TimeOfDay - open).TotalMinutes / 15), 0, SessionSlots - 1);
+        var minutesOpen = (int)(easternNow.TimeOfDay - open).TotalMinutes;
+        // With a cycle shorter than 15 minutes, only the first cycle of each quarter hour may spend calls.
+        if (minutesOpen % 15 >= 5) return false;
+        var slot = Math.Clamp(minutesOpen / 15, 0, SessionSlots - 1);
         // Evenly spaced slots that always include the 4:00 PM close.
         return (slot + 1) * cycles / SessionSlots > slot * cycles / SessionSlots;
     }
@@ -171,7 +174,10 @@ public sealed class PriceUpdateService
     private readonly PriceHistoryStore history;
     private readonly CurrencyConversionService currencyConversion;
     private readonly int eodhdDailyCallLimit;
-    private int nextProvider;
+    // Listings for which Finnhub answered with an end-of-day price today (US OTC). Relearned each day,
+    // so a listing that moves to an exchange goes back to Finnhub on its own.
+    private readonly HashSet<string> endOfDayOnlyAtFinnhub = new(StringComparer.OrdinalIgnoreCase);
+    private DateOnly learnedOn;
 
     public PriceUpdateService(IEnumerable<IQuoteProvider> providers, IOptions<RiskRewardOptions> options, StateStore stateStore, ILogger<PriceUpdateService> logger, ProviderRunCsvLogger providerRuns, PriceHistoryStore history, CurrencyConversionService currencyConversion, IOptions<ProviderOptions> providerOptions)
     {
@@ -199,58 +205,86 @@ public sealed class PriceUpdateService
         var catalog = await ReadCatalogAsync(target, cancellationToken);
         if (catalog.Charts.Count == 0) { logger.LogInformation("No published charts were found."); return new PriceUpdateResult(0, 0, target); }
 
-        var alternating = providers.Where(provider => !provider.Name.Equals("eodhd", StringComparison.OrdinalIgnoreCase)).ToList();
-        var eodhd = providers.Where(provider => provider.Name.Equals("eodhd", StringComparison.OrdinalIgnoreCase));
-        var start = nextProvider++ % alternating.Count;
-        var orderedProviders = alternating.Skip(start).Concat(alternating.Take(start)).Concat(eodhd).ToList();
-        var primary = orderedProviders[0];
+        // Each listing is routed to the provider that has the freshest data for it, with no per-symbol
+        // configuration, so a newly published chart is handled from its first cycle:
+        //  - Finnhub (free) is near real time for exchange-listed US stocks, so it is asked first.
+        //  - EODHD (15-20 minutes delayed) is the only source with same-day quotes for Canadian listings
+        //    and for US OTC listings, where Finnhub returns just an end-of-day price. Canadian listings are
+        //    recognised by currency; OTC listings are learned from Finnhub's end-of-day answer and then go to
+        //    EODHD first for the rest of the day.
+        //  - Twelve Data (8 requests a minute on the free plan) is only a last fallback.
+        var finnhub = FindProvider("finnhub");
+        var twelveData = FindProvider("twelveData");
+        var eodhd = FindProvider("eodhd");
         var now = DateTimeOffset.UtcNow;
+        var unlimitedEodhd = eodhd is not null && EodhdBudget.IsUnlimited(eodhdDailyCallLimit, catalog.Charts.Count);
+        var today = DateOnly.FromDateTime(MarketSchedule.ToEastern(now).Date);
+        if (today != learnedOn) { endOfDayOnlyAtFinnhub.Clear(); learnedOn = today; }
+
         var quotes = new Dictionary<string, Quote>(StringComparer.OrdinalIgnoreCase);
         var rationed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var confirmedLatest = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var eodhdRationed = false;
-        foreach (var provider in orderedProviders)
+
+        List<RiskRewardChart> Missing() => catalog.Charts.Where(chart => !quotes.ContainsKey(chart.TickerSymbol)).ToList();
+        // A quote from an earlier session is not an answer: the next provider is asked for a newer one.
+        List<RiskRewardChart> Lagging(bool allowOpeningGrace) => catalog.Charts.Where(chart =>
+            !confirmedLatest.Contains(chart.TickerSymbol) && quotes.TryGetValue(chart.TickerSymbol, out var held) &&
+            MarketSchedule.IsLaggingQuote(held.QuotedAt, now, allowOpeningGrace)).ToList();
+
+        async Task AskAsync(IQuoteProvider provider, List<RiskRewardChart> wanted)
         {
-            var missing = catalog.Charts.Where(chart => !quotes.ContainsKey(chart.TickerSymbol)).ToList();
-            // A quote from an earlier session is not an answer: ask the next provider for a newer one.
-            // An unrationed EODHD is asked from the opening bell; the other providers only after the first
-            // hour, when yesterday's last trade stops being normal for a thinly traded listing.
-            var askFromTheOpen = IsEodhd(provider) && EodhdBudget.IsUnlimited(eodhdDailyCallLimit, catalog.Charts.Count);
-            var lagging = catalog.Charts.Where(chart => quotes.TryGetValue(chart.TickerSymbol, out var held) &&
-                MarketSchedule.IsLaggingQuote(held.QuotedAt, now, allowOpeningGrace: !askFromTheOpen)).ToList();
-            var wanted = missing.Concat(lagging).ToList();
-            if (wanted.Count == 0) continue;
-            if (IsEodhd(provider))
-            {
-                // Listings that have an old quote only go to EODHD when its allowance covers every cycle.
-                if (!EodhdBudget.IsUnlimited(eodhdDailyCallLimit, wanted.Count)) wanted = missing;
-                if (wanted.Count == 0) continue;
-                if (!EodhdBudget.AllowsCycle(now, wanted.Count, eodhdDailyCallLimit))
-                {
-                    eodhdRationed = true;
-                    foreach (var chart in wanted) rationed.Add(chart.TickerSymbol);
-                    logger.LogInformation("EODHD was not called for {Count} symbols this cycle; its {Limit} daily calls are spread across the trading session.", wanted.Count, eodhdDailyCallLimit);
-                    continue;
-                }
-            }
-            if (provider != primary)
-                logger.LogWarning("Quote providers still missed {Count} symbols ({LaggingCount} with only an earlier-session quote); trying {Provider}.", wanted.Count, wanted.Count - missing.Count, provider.Name);
+            if (wanted.Count == 0) return;
             var providerCatalog = new ChartCatalog { Charts = wanted };
             foreach (var pair in await GetQuotesSafelyAsync(provider, BuildSymbols(providerCatalog, provider.Name), cancellationToken))
             {
                 // EODHD has same-day data, so its answer is the listing's latest trade even when that trade
                 // was in an earlier session (thinly traded OTC listings). It also wins a timestamp tie.
                 if (IsEodhd(provider)) confirmedLatest.Add(pair.Key);
+                if (pair.Value.IsEndOfDayOnly && !IsEodhd(provider)) endOfDayOnlyAtFinnhub.Add(pair.Key);
                 if (!quotes.TryGetValue(pair.Key, out var held) || pair.Value.QuotedAt > held.QuotedAt ||
                     (IsEodhd(provider) && pair.Value.QuotedAt == held.QuotedAt))
                     quotes[pair.Key] = pair.Value;
             }
         }
 
+        var eodhdFirst = unlimitedEodhd
+            ? catalog.Charts.Where(chart => IsCanadianListing(chart) || endOfDayOnlyAtFinnhub.Contains(chart.TickerSymbol)).ToList()
+            : [];
+        if (unlimitedEodhd) await AskAsync(eodhd!, eodhdFirst);
+        if (finnhub is not null) await AskAsync(finnhub, Missing());
+        if (unlimitedEodhd)
+        {
+            // From the opening bell: EODHD may already have today's first trade.
+            var wanted = Missing().Concat(Lagging(allowOpeningGrace: false)).ToList();
+            if (wanted.Count > 0)
+                logger.LogInformation("Finnhub had no current-session quote for {Count} symbols; asking EODHD.", wanted.Count);
+            await AskAsync(eodhd!, wanted);
+            var stillMissing = Missing();
+            if (twelveData is not null && stillMissing.Count > 0)
+            {
+                logger.LogWarning("Quote providers still missed {Count} symbols; trying {Provider}.", stillMissing.Count, twelveData.Name);
+                await AskAsync(twelveData, stillMissing);
+            }
+        }
+        else
+        {
+            // Free EODHD plan: Twelve Data is asked before the rationed EODHD calls are spent.
+            if (twelveData is not null) await AskAsync(twelveData, Missing().Concat(Lagging(allowOpeningGrace: true)).ToList());
+            var missing = Missing();
+            if (eodhd is not null && missing.Count > 0)
+            {
+                if (EodhdBudget.AllowsCycle(now, missing.Count, eodhdDailyCallLimit)) await AskAsync(eodhd, missing);
+                else
+                {
+                    foreach (var chart in missing) rationed.Add(chart.TickerSymbol);
+                    logger.LogInformation("EODHD was not called for {Count} symbols this cycle; its {Limit} daily calls are spread across the trading session.", missing.Count, eodhdDailyCallLimit);
+                }
+            }
+        }
+
         // The derived pass must not spend rationed EODHD calls on USD listings.
-        var derivedProviders = eodhdRationed || !EodhdBudget.IsUnlimited(eodhdDailyCallLimit, 1)
-            ? orderedProviders.Where(provider => !IsEodhd(provider)).ToList()
-            : orderedProviders;
+        var derivedProviders = new[] { finnhub, twelveData, unlimitedEodhd ? eodhd : null }
+            .Where(provider => provider is not null).Select(provider => provider!).ToList();
         await AddDerivedCadFallbacksAsync(catalog, quotes, derivedProviders, cancellationToken);
 
         var answeredQuotes = new Dictionary<string, Quote>(quotes, StringComparer.OrdinalIgnoreCase);
@@ -282,11 +316,17 @@ public sealed class PriceUpdateService
         try { await history.UpdateAsync(target, catalog, answeredQuotes, cancellationToken); }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
         catch (Exception ex) { logger.LogError(ex, "Current prices were published, but the history update failed and will be retried on a later run."); }
-        logger.LogInformation("Published {Count}/{Total} prices to {Target}, including {FreshCount} fresh quotes and {LaggingCount} from an earlier session; primary provider was {Provider}.", quotes.Count, catalog.Charts.Count, target, freshCount, laggingTickers.Count, primary.Name);
+        logger.LogInformation("Published {Count}/{Total} prices to {Target}, including {FreshCount} fresh quotes and {LaggingCount} from an earlier session; {EodhdFirst} symbols were routed to EODHD first.", quotes.Count, catalog.Charts.Count, target, freshCount, laggingTickers.Count, eodhdFirst.Count);
         return new PriceUpdateResult(freshCount, catalog.Charts.Count, target, laggingTickers.Count);
     }
 
     private static bool IsEodhd(IQuoteProvider provider) => provider.Name.Equals("eodhd", StringComparison.OrdinalIgnoreCase);
+
+    private IQuoteProvider? FindProvider(string name) =>
+        providers.FirstOrDefault(provider => provider.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsCanadianListing(RiskRewardChart chart) =>
+        MarketMetadata.NormalizeCurrency(chart.Currency, chart.TickerSymbol) == "CAD";
 
     private async Task<Dictionary<string, PublishedExchangeRate>> GetPublishedExchangeRatesAsync(
         PriceCatalog previous,

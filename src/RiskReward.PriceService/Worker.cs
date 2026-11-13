@@ -2,8 +2,9 @@ using RiskReward.Infrastructure;
 
 namespace RiskReward.PriceService;
 
-public sealed class Worker(PriceUpdateService updater, ILogger<Worker> logger) : BackgroundService
+public sealed class Worker(PriceUpdateService updater, ILogger<Worker> logger, Microsoft.Extensions.Options.IOptions<ProviderOptions> providerOptions) : BackgroundService
 {
+    private readonly int cycleMinutes = providerOptions.Value.CycleMinutes is 1 or 2 or 3 or 5 or 10 or 15 ? providerOptions.Value.CycleMinutes : 5;
     private readonly TimeZoneInfo eastern = TimeZoneInfo.FindSystemTimeZoneById("Eastern Standard Time");
     private string? lastSlot;
     private DateOnly? completedFinalUpdate;
@@ -11,7 +12,7 @@ public sealed class Worker(PriceUpdateService updater, ILogger<Worker> logger) :
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        logger.LogInformation("Risk/Reward price service started; the configured deployment target is checked before every update.");
+        logger.LogInformation("Risk/Reward price service started; prices refresh every {CycleMinutes} minutes during the session and the configured deployment target is checked before every update.", cycleMinutes);
         var startupResult = await RunUpdateAsync("startup price refresh", stoppingToken);
         var startupEastern = TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, eastern);
         if (MarketSchedule.IsFinalRetryWindow(startupEastern) && startupResult?.AllAnswered == true)
@@ -20,7 +21,7 @@ public sealed class Worker(PriceUpdateService updater, ILogger<Worker> logger) :
         {
             var easternNow = TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, eastern);
             var slot = MarketSchedule.SlotKey(easternNow);
-            if (MarketSchedule.IsPollingSlot(easternNow) && slot != lastSlot)
+            if (MarketSchedule.IsPollingSlot(easternNow, cycleMinutes) && slot != lastSlot)
             {
                 lastSlot = slot;
                 if (easternNow.Hour == 16) nextFinalAttempt = easternNow.AddMinutes(5);

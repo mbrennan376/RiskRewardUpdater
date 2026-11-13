@@ -37,7 +37,13 @@ The OpenAI actions are entirely optional and disabled until an API key is config
 
 ## Price service
 
-The service alternates Twelve Data and Finnhub every 15-minute polling cycle, falling back per missing symbol and then trying EODHD. It runs on weekdays from 9:30 a.m. through 4:00 p.m. Eastern. Provider-specific Canadian/OTC/EODHD symbols can be entered during chart review.
+The service refreshes prices every `Providers:CycleMinutes` minutes (default 5) on weekdays from 9:30 a.m. through 4:00 p.m. Eastern, and routes each listing to the provider with the freshest data for it. No per-symbol setup is needed, so a newly published chart is handled from its first cycle:
+
+- **Exchange-listed US stocks:** Finnhub first (near real time on the free plan), then EODHD, then Twelve Data.
+- **Canadian listings** (chart currency CAD): EODHD first; it is the only configured source with same-day TSX/TSXV quotes (15-20 minutes delayed).
+- **US OTC listings:** Finnhub returns only an end-of-day price for these (a midnight-UTC date stamp). The service notices that answer, asks EODHD in the same cycle, and sends the listing to EODHD first for the rest of the day. The list is relearned each day, so a listing that moves to an exchange goes back to Finnhub on its own.
+
+A price EODHD confirmed this cycle is never marked stale, even when the latest trade was in an earlier session (thinly traded listings). Twelve Data (8 requests a minute on the free plan) is only a last fallback. With a rationed EODHD allowance (see below) the order is Finnhub, Twelve Data, then EODHD on its budgeted cycles. Provider-specific Canadian/OTC/EODHD symbols can be entered during chart review.
 
 EODHD's free plan allows 20 calls a day (one per symbol), and it is the only configured provider with intraday TSX/TSXV quotes. `Providers:EodhdDailyCallLimit` (default 20) spreads those calls evenly from the open to the 4:00 PM close instead of spending them all by late morning; between EODHD cycles the last current-session quote is kept. Set it to `0` on a paid EODHD plan: every cycle then calls EODHD, including for OTC listings whose other providers only have an earlier session's close.
 
