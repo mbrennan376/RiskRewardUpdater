@@ -4,7 +4,14 @@ using RiskReward.Core;
 using RiskReward.Infrastructure;
 using System.Text.Json.Serialization;
 
-var builder = WebApplication.CreateBuilder(args);
+// A published copy (the Windows service on SERVER7 starts in System32) reads content and wwwroot from its own
+// folder. "dotnet run" and Visual Studio have no wwwroot beside the built exe, so they keep the project folder.
+var builder = WebApplication.CreateBuilder(new WebApplicationOptions
+{
+    Args = args,
+    ContentRootPath = Directory.Exists(Path.Combine(AppContext.BaseDirectory, "wwwroot")) ? AppContext.BaseDirectory : null
+});
+builder.Host.UseWindowsService(options => options.ServiceName = "RiskRewardAdmin");
 builder.WebHost.UseUrls(builder.Configuration["Urls"] ?? "http://127.0.0.1:5188");
 builder.Services.Configure<RiskRewardOptions>(builder.Configuration.GetSection("RiskReward"));
 builder.Services.Configure<ProviderOptions>(builder.Configuration.GetSection("Providers"));

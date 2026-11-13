@@ -8,11 +8,12 @@
   <ItemGroup>
     <ProjectReference Include="src\RiskReward.Core\RiskReward.Core.csproj" />
     <ProjectReference Include="src\RiskReward.Infrastructure\RiskReward.Infrastructure.csproj" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="8.0.1" />
   </ItemGroup>
   <ItemGroup>
-    <Compile Remove="src\**\*.cs;tests\**\*.cs" />
-    <Content Remove="src\**;tests\**" />
-    <None Remove="src\**;tests\**" />
+    <Compile Remove="src\**\*.cs;tests\**\*.cs;artifacts\**\*.cs;deployment\**\*.cs" />
+    <Content Remove="src\**;tests\**;artifacts\**;deployment\**" />
+    <None Remove="src\**;tests\**;artifacts\**;deployment\**" />
   </ItemGroup>
   <ItemGroup>
     <None Update="appsettings.json"><CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory></None>
