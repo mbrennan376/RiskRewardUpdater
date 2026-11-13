@@ -80,6 +80,7 @@ public sealed class MarketCalendarService
 
             var changed = false;
             var usLoaded = false;
+            var canadaLoaded = false;
             foreach (var exchange in Exchanges)
             {
                 try
@@ -89,7 +90,7 @@ public sealed class MarketCalendarService
                     if (holidays.Count == 0) { logger.LogWarning("Finnhub returned no market holidays for {Exchange}; the saved calendar is kept.", exchange); continue; }
                     byExchange[exchange] = holidays;
                     changed = true;
-                    if (exchange == "US") usLoaded = true;
+                    if (exchange == "US") usLoaded = true; else canadaLoaded = true;
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
                 catch (Exception ex) when (ex is HttpRequestException or JsonException or TaskCanceledException or InvalidOperationException)
@@ -97,8 +98,10 @@ public sealed class MarketCalendarService
                     logger.LogWarning("Market holidays for {Exchange} could not be loaded from Finnhub ({Reason}); the saved calendar is kept.", exchange, ex.Message);
                 }
             }
-            // Loaded once a day; a failed load is tried again in half an hour.
-            if (usLoaded) loadedOn = today; else retryAfter = nowUtc.AddMinutes(30);
+            // Loaded once a day. A failed US load is tried again in half an hour; if only the Canadian
+            // calendars are missing, in six hours, so their holidays are not left unknown until tomorrow.
+            if (usLoaded && canadaLoaded) loadedOn = today;
+            else retryAfter = nowUtc.Add(usLoaded ? TimeSpan.FromHours(6) : TimeSpan.FromMinutes(30));
             if (changed)
             {
                 calendar = new MarketCalendar(byExchange);
