@@ -67,7 +67,7 @@ namespace HSPI_RiskRewardStatus
             }
             else
             {
-                stale = explicitlyStale || !HasRequiredCloseUpdate(catalog.GeneratedAt, easternNow);
+                stale = explicitlyStale || !HasRequiredCloseUpdate(catalog.GeneratedAt, easternNow, holidayToday);
             }
 
             if (stale) return Status(1, "Prices may be stale");
@@ -85,19 +85,19 @@ namespace HSPI_RiskRewardStatus
             return Status(3, holidayToday && !string.IsNullOrWhiteSpace(holiday.Name) ? "Market closed: " + holiday.Name.Trim() : "Market closed");
         }
 
-        private static bool HasRequiredCloseUpdate(DateTimeOffset generatedAt, DateTimeOffset easternNow)
+        private static bool HasRequiredCloseUpdate(DateTimeOffset generatedAt, DateTimeOffset easternNow, bool closedToday)
         {
             if (generatedAt == default(DateTimeOffset)) return false;
-            var requiredDate = MostRecentRequiredCloseDate(easternNow);
+            var requiredDate = MostRecentRequiredCloseDate(easternNow, closedToday);
             var generatedEastern = TimeZoneInfo.ConvertTime(generatedAt, Eastern);
             return generatedEastern.Date > requiredDate ||
                    (generatedEastern.Date == requiredDate && generatedEastern.TimeOfDay >= new TimeSpan(16, 0, 0));
         }
 
-        private static DateTime MostRecentRequiredCloseDate(DateTimeOffset easternNow)
+        private static DateTime MostRecentRequiredCloseDate(DateTimeOffset easternNow, bool closedToday)
         {
             var weekday = easternNow.DayOfWeek != DayOfWeek.Saturday && easternNow.DayOfWeek != DayOfWeek.Sunday;
-            if (weekday && easternNow.TimeOfDay >= new TimeSpan(16, 0, 0)) return easternNow.Date;
+            if (weekday && !closedToday && easternNow.TimeOfDay >= new TimeSpan(16, 0, 0)) return easternNow.Date;
             var date = easternNow.Date.AddDays(-1);
             while (date.DayOfWeek == DayOfWeek.Saturday || date.DayOfWeek == DayOfWeek.Sunday) date = date.AddDays(-1);
             return date;

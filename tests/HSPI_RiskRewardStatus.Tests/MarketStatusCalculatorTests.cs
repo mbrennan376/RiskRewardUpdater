@@ -79,6 +79,15 @@ namespace HSPI_RiskRewardStatus.Tests
         }
 
         [Fact]
+        public void HolidayEveningDoesNotExpectAFourPmUpdate()
+        {
+            // Thanksgiving 2026 at 6:00 PM Eastern, last published at noon.
+            var now = Utc(2026, 11, 26, 23, 0);
+            var catalog = Catalog(Utc(2026, 11, 26, 17, 0), Utc(2026, 11, 25, 21, 0));
+            catalog.MarketHoliday = new MarketHolidayNotice { Date = "2026-11-26", Name = "Thanksgiving Day" };
+            AssertStatus(catalog, now, 3, "Market closed: Thanksgiving Day");
+        }
+        [Fact]
         public void YesterdaysHolidayNoticeDoesNotCloseToday()
         {
             var now = Utc(2026, 11, 27, 16, 0);
