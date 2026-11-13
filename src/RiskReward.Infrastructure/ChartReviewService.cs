@@ -104,6 +104,7 @@ public sealed class ChartReviewService
         if (!Directory.Exists(options.ScreenshotFolder)) return [];
         var present = Directory.EnumerateFiles(options.ScreenshotFolder)
             .Where(path => ImageExtensions.Contains(Path.GetExtension(path)))
+            .Where(path => !Path.GetFileName(path).StartsWith("b_", StringComparison.OrdinalIgnoreCase))
             .Select(path => Path.GetFileNameWithoutExtension(path).Trim())
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
         if (present.Count == 0) return [];
