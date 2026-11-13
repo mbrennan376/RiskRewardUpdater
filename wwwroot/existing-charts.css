@@ -1,6 +1,6 @@
 .existing-tools {
   display: grid;
-  grid-template-columns: auto minmax(220px, 420px) auto;
+  grid-template-columns: auto minmax(220px, 420px) auto auto;
   align-items: center;
   gap: 10px;
   margin: 0 0 16px;
@@ -21,6 +21,49 @@
   background: #090e14;
   color: #eef5fc;
   padding: 10px 11px;
+}
+
+.removals {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 16px;
+  padding: 10px 14px;
+  border: 1px solid #5a4421;
+  border-radius: 14px;
+  background: #1a1408;
+  color: #f1d9a6;
+  font-size: .85rem;
+}
+
+.removals[hidden] {
+  display: none;
+}
+
+.removal-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 4px 3px 10px;
+  border: 1px solid #5a4421;
+  border-radius: 999px;
+  font-weight: 700;
+}
+
+.removal-item button {
+  border: 0;
+  border-radius: 999px;
+  background: #33280f;
+  color: #f1d9a6;
+  padding: 4px 9px;
+  font: inherit;
+  font-size: .75rem;
+  cursor: pointer;
+}
+
+.removal-item button:hover {
+  background: #4a3a16;
 }
 
 @media (max-width: 700px) {

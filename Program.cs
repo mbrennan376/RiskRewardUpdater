@@ -111,6 +111,16 @@ app.MapPost("/api/charts/{ticker}/reopen", async (string ticker, ChartReviewServ
     catch (InvalidOperationException ex) { return Results.BadRequest(new { error = ex.Message }); }
 });
 
+app.MapGet("/api/charts/removals", async (ChartReviewService review, CancellationToken cancellationToken) => Results.Ok(await review.PendingRemovalsAsync(cancellationToken)));
+
+app.MapGet("/api/charts/missing-screenshots", async (ChartReviewService review, CancellationToken cancellationToken) => Results.Ok(await review.MissingScreenshotsAsync(cancellationToken)));
+
+app.MapPost("/api/charts/{ticker}/remove", async (string ticker, ChartReviewService review, CancellationToken cancellationToken) =>
+    await review.MarkForRemovalAsync(ticker, cancellationToken) ? Results.Ok(await review.PendingRemovalsAsync(cancellationToken)) : Results.NotFound());
+
+app.MapDelete("/api/charts/{ticker}/remove", async (string ticker, ChartReviewService review, CancellationToken cancellationToken) =>
+    await review.UndoRemovalAsync(ticker, cancellationToken) ? Results.Ok(await review.PendingRemovalsAsync(cancellationToken)) : Results.NotFound());
+
 app.MapGet("/api/source-image/{ticker}", async (string ticker, StateStore store, CancellationToken cancellationToken) =>
 {
     var state = await store.LoadAsync(cancellationToken);

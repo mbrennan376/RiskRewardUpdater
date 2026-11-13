@@ -62,10 +62,17 @@ public sealed class SitePublisher
             };
         }
 
+        // Charts the user asked to take off the site. A chart approved in this same batch stays.
+        var removed = state.PendingRemovals
+            .Where(ticker => nextCharts.ContainsKey(ticker) && !approved.Any(d => d.TickerSymbol.Equals(ticker, StringComparison.OrdinalIgnoreCase)))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        foreach (var ticker in removed) nextCharts.Remove(ticker);
+
         foreach (var chart in nextCharts.Values)
             chart.Currency = MarketMetadata.NormalizeCurrency(chart.Currency, MarketMetadata.ActiveSymbol(chart));
         var catalog = new ChartCatalog { GeneratedAt = DateTimeOffset.UtcNow, Charts = nextCharts.Values.OrderBy(c => c.TickerSymbol).ToList() };
-        var record = new PublicationRecord { PublishedAt = DateTimeOffset.UtcNow, Target = target, Tickers = approved.Select(d => d.TickerSymbol).ToList() };
+        var record = new PublicationRecord { PublishedAt = DateTimeOffset.UtcNow, Target = target, Tickers = approved.Select(d => d.TickerSymbol).ToList(), RemovedTickers = removed };
         try
         {
             if (target == DeploymentTarget.Local) await PublishLocalAsync(catalog, approved, cancellationToken);
@@ -82,6 +89,12 @@ public sealed class SitePublisher
                     state.Charts[draft.TickerSymbol] = nextCharts[draft.TickerSymbol];
                     state.Drafts.Remove(draft.TickerSymbol);
                 }
+            }
+            // Like approved charts, removals become final only on the live site; a local preview keeps them pending.
+            if (target == DeploymentTarget.Live)
+            {
+                foreach (var ticker in removed) state.Charts.Remove(ticker);
+                state.PendingRemovals.Clear();
             }
         }
         catch (Exception ex)

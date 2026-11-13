@@ -88,6 +88,63 @@ public sealed class ChartReviewService
         return state.Charts.Values.OrderBy(chart => chart.TickerSymbol).ToList();
     }
 
+    public async Task<IReadOnlyList<string>> PendingRemovalsAsync(CancellationToken cancellationToken = default)
+    {
+        var state = await store.LoadAsync(cancellationToken);
+        return state.PendingRemovals.OrderBy(ticker => ticker, StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
+    /// <summary>
+    /// Published charts whose screenshot is no longer in the folder and that are not yet marked for removal: the
+    /// page offers to take them off the site. Deleting a file never removes a chart by itself, and an empty or
+    /// missing folder (Drive not synced) reports nothing.
+    /// </summary>
+    public async Task<IReadOnlyList<string>> MissingScreenshotsAsync(CancellationToken cancellationToken = default)
+    {
+        if (!Directory.Exists(options.ScreenshotFolder)) return [];
+        var present = Directory.EnumerateFiles(options.ScreenshotFolder)
+            .Where(path => ImageExtensions.Contains(Path.GetExtension(path)))
+            .Select(path => Path.GetFileNameWithoutExtension(path).Trim())
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (present.Count == 0) return [];
+        var state = await store.LoadAsync(cancellationToken);
+        return state.Charts.Values.Select(chart => chart.TickerSymbol)
+            .Where(ticker => !present.Contains(ticker) && !state.PendingRemovals.Contains(ticker, StringComparer.OrdinalIgnoreCase))
+            .OrderBy(ticker => ticker, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    /// <summary>
+    /// Marks a published chart to be taken off the site by the next publication. Nothing changes on the site until
+    /// then. A screenshot waiting for the same ticker is skipped, so it neither blocks nor republishes the chart.
+    /// Returns false when the ticker is not a published chart.
+    /// </summary>
+    public async Task<bool> MarkForRemovalAsync(string ticker, CancellationToken cancellationToken = default)
+    {
+        ticker = ticker.Trim().ToUpperInvariant();
+        var state = await store.LoadAsync(cancellationToken);
+        if (!state.Charts.TryGetValue(ticker, out var published)) return false;
+        if (!state.PendingRemovals.Contains(published.TickerSymbol, StringComparer.OrdinalIgnoreCase))
+            state.PendingRemovals.Add(published.TickerSymbol);
+        if (state.Drafts.TryGetValue(ticker, out var draft))
+        {
+            draft.Ready = false;
+            draft.Skipped = true;
+        }
+        await store.SaveAsync(state, cancellationToken);
+        return true;
+    }
+
+    /// <summary>Takes back a removal that has not been published yet. Returns false when there was none.</summary>
+    public async Task<bool> UndoRemovalAsync(string ticker, CancellationToken cancellationToken = default)
+    {
+        ticker = ticker.Trim();
+        var state = await store.LoadAsync(cancellationToken);
+        if (state.PendingRemovals.RemoveAll(item => item.Equals(ticker, StringComparison.OrdinalIgnoreCase)) == 0) return false;
+        await store.SaveAsync(state, cancellationToken);
+        return true;
+    }
+
     public async Task<ChartDraft?> ReopenPublishedAsync(string ticker, CancellationToken cancellationToken = default)
     {
         ticker = ticker.Trim().ToUpperInvariant();
@@ -152,6 +209,8 @@ public sealed class ChartReviewService
                 .ToDictionary(pair => pair.Key, pair => pair.Value.Trim(), StringComparer.OrdinalIgnoreCase);
         existing.Ready = input.Ready;
         existing.Skipped = input.Skipped;
+        // Marking a chart ready again is the newer decision: it replaces an earlier request to remove it.
+        if (existing.Ready) state.PendingRemovals.RemoveAll(item => item.Equals(ticker, StringComparison.OrdinalIgnoreCase));
         if (!ticker.Equals(originalTicker, StringComparison.OrdinalIgnoreCase))
         {
             state.Drafts.Remove(originalTicker);

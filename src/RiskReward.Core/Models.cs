@@ -70,6 +70,8 @@ public sealed class PublicationRecord
     public DateTimeOffset PublishedAt { get; set; }
     public DeploymentTarget Target { get; set; }
     public List<string> Tickers { get; set; } = [];
+    /// <summary>Charts this publication took off the site.</summary>
+    public List<string> RemovedTickers { get; set; } = [];
     public bool Succeeded { get; set; }
     public string? Error { get; set; }
     public bool PriceRefreshAttempted { get; set; }
@@ -83,6 +85,8 @@ public sealed class ApplicationState
     public Dictionary<string, RiskRewardChart> Charts { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public Dictionary<string, ChartDraft> Drafts { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public List<PublicationRecord> Publications { get; set; } = [];
+    /// <summary>Published charts the user asked to take off the site; the next live publication removes them.</summary>
+    public List<string> PendingRemovals { get; set; } = [];
 }
 
 public sealed record Quote(

@@ -1,4 +1,4 @@
-const state={status:null,charts:[],published:[],selected:null,view:location.hash.toLowerCase()==='#ages'?'ages':'review',ageQuery:'',ageFilter:'all'};
+const state={status:null,charts:[],published:[],removals:[],missing:[],selected:null,view:location.hash.toLowerCase()==='#ages'?'ages':'review',ageQuery:'',ageFilter:'all'};
 const $=id=>document.getElementById(id);
 
 async function request(url,options={}){
@@ -14,8 +14,8 @@ async function load(){
   showMessage('Scanning screenshot folder…');
   try{
     [state.status,state.charts]=await Promise.all([request('/api/status'),request('/api/charts/pending')]);
-    state.published=await request('/api/charts/published');
-    renderTarget();renderQueue();renderExisting();renderAges();renderView();
+    [state.published,state.removals,state.missing]=await Promise.all([request('/api/charts/published'),request('/api/charts/removals'),request('/api/charts/missing-screenshots')]);
+    renderTarget();renderQueue();renderExisting();renderRemovals();renderAges();renderView();
     if(state.selected){state.selected=state.charts.find(c=>c.tickerSymbol===state.selected.tickerSymbol)||state.charts[0];}
     else state.selected=state.charts[0];
     renderForm();showMessage(`${state.charts.length} changed screenshot${state.charts.length===1?'':'s'} found.`);
@@ -23,13 +23,29 @@ async function load(){
 }
 
 function renderExisting(){
-  const active=new Set(state.charts.map(chart=>chart.tickerSymbol));
-  const available=state.published.filter(chart=>!active.has(chart.tickerSymbol));
+  const available=state.published;
   const select=$('existingChart'),previous=select.value;
   select.replaceChildren(...available.map(chart=>{const option=document.createElement('option');option.value=chart.tickerSymbol;option.textContent=`${chart.tickerSymbol} — ${chart.companyName}`;return option;}));
   if(available.some(chart=>chart.tickerSymbol===previous))select.value=previous;
-  $('reopenChart').disabled=available.length===0;
-  if(available.length===0){const option=document.createElement('option');option.textContent='No additional published charts';option.value='';select.append(option);}
+  $('reopenChart').disabled=available.length===0;$('removeChart').disabled=available.length===0;
+  if(available.length===0){const option=document.createElement('option');option.textContent='No published charts';option.value='';select.append(option);}
+}
+
+function renderRemovals(){
+  const box=$('removals'),nodes=[],chip=(ticker,label,title,action)=>{const item=textNode('span',ticker,'removal-item'),button=textNode('button',label);button.type='button';button.title=title;button.onclick=action;item.append(button);return item;};
+  if(state.removals.length)nodes.push(textNode('span','Will be taken off the site on the next live publish:'),...state.removals.map(ticker=>chip(ticker,'Undo',`Keep ${ticker} on the site`,()=>undoRemoval(ticker))));
+  if(state.missing.length)nodes.push(textNode('span','Screenshot deleted from the folder, still on the site:'),...state.missing.map(ticker=>chip(ticker,'Remove from site',`Take ${ticker} off the site on the next live publish`,()=>removeFromSite(ticker))));
+  box.hidden=nodes.length===0;box.replaceChildren(...nodes);
+}
+async function removeFromSite(ticker){
+  if(!ticker)return;
+  if(!confirm(`Take ${ticker} off the site? It disappears from the site on the next live publish. You can undo this until then.`))return;
+  try{state.removals=await request(`/api/charts/${encodeURIComponent(ticker)}/remove`,{method:'POST'});await load();showMessage(`${ticker} will be taken off the site on the next live publish. If its screenshot is still in the folder, delete it, or it will come back as a new chart.`,'success');}
+  catch(error){showMessage(error.message,'error');}
+}
+async function undoRemoval(ticker){
+  try{state.removals=await request(`/api/charts/${encodeURIComponent(ticker)}/remove`,{method:'DELETE'});await load();showMessage(`${ticker} stays on the site.`,'success');}
+  catch(error){showMessage(error.message,'error');}
 }
 
 function renderTarget(){
@@ -143,8 +159,12 @@ async function save(ready=false,skipped=false){
 
 $('reviewForm').addEventListener('submit',event=>{event.preventDefault();save(true,false);});
 $('save').onclick=()=>save(false,false);$('skip').onclick=()=>save(false,true);$('rescan').onclick=load;
+$('removeChart').onclick=()=>removeFromSite($('existingChart').value);
 $('reopenChart').onclick=async()=>{
   const ticker=$('existingChart').value;if(!ticker)return;
+  // A chart that already has a screenshot waiting is in the queue: just select it.
+  const waiting=state.charts.find(chart=>String(chart.tickerSymbol).toUpperCase()===ticker.toUpperCase());
+  if(waiting){state.selected=waiting;renderQueue();renderForm();showMessage(`${ticker} is already in the review queue.`);return;}
   showMessage(`Opening ${ticker} for review…`);
   try{
     const draft=await request(`/api/charts/${encodeURIComponent(ticker)}/reopen`,{method:'POST'});
@@ -196,7 +216,7 @@ window.addEventListener('hashchange',()=>{state.view=location.hash.toLowerCase()
 $('publish').onclick=async()=>{
   const live=String(state.status.target).toLowerCase()==='live',destination=live?'Live Azure':'the local preview';
   showMessage(`Publishing approved charts to ${destination}…`);$('publish').disabled=true;
-  try{const result=await request('/api/publish',{method:'POST',body:'{}'});const confirmation=result.tickers.length?`Published ${result.tickers.length} chart(s) to ${destination}.`:`Published the current site assets and chart catalog to ${destination}.`;await load();showMessage(`${confirmation} Refreshing prices in the background…`,'success');if(!live)openPreview();alert(confirmation);if(result.priceRefreshAttempted)watchPriceRefresh(confirmation);}catch(error){showMessage(error.message,'error');}
+  try{const result=await request('/api/publish',{method:'POST',body:'{}'});const removedCount=(result.removedTickers||[]).length,removedNote=removedCount?` Took ${result.removedTickers.join(', ')} off the ${live?'site':'preview'}.`:'',confirmation=(result.tickers.length?`Published ${result.tickers.length} chart(s) to ${destination}.`:`Published the current site assets and chart catalog to ${destination}.`)+removedNote;await load();showMessage(`${confirmation} Refreshing prices in the background…`,'success');if(!live)openPreview();alert(confirmation);if(result.priceRefreshAttempted)watchPriceRefresh(confirmation);}catch(error){showMessage(error.message,'error');}
   finally{renderTarget();}
 };
 // The price refresh waits out provider rate limits and can take a few minutes.
