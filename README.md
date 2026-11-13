@@ -1,6 +1,6 @@
 # Risk/Reward Publisher
 
-This solution contains a localhost chart-review site, shared chart/price infrastructure, and a Windows price-update service. The public dashboard remains a static site in `C:\source\repos\riskrewardsite`.
+This solution contains a localhost chart-review site, shared chart/price infrastructure, and a Windows price-update service. The public dashboard remains a static site in `C:\Code\home\misc\riskrewardsite`.
 
 ## Safe development workflow
 

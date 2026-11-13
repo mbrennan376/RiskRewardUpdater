@@ -81,4 +81,4 @@ Current local prices:
   C:\RiskReward\PreviewSite\prices.json
 
 Editable static-site source:
-  C:\source\repos\riskrewardsite
+  C:\Code\home\misc\riskrewardsite

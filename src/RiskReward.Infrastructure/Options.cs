@@ -4,7 +4,7 @@ public sealed class RiskRewardOptions
 {
     public string ScreenshotFolder { get; set; } = @"C:\Junk\Charts\Charts";
     public string StateFolder { get; set; } = @"C:\ProgramData\RiskReward";
-    public string StaticSiteSourcePath { get; set; } = @"C:\source\repos\riskrewardsite";
+    public string StaticSiteSourcePath { get; set; } = @"C:\Code\home\misc\riskrewardsite";
     public string LocalSitePath { get; set; } = @"C:\RiskReward\PreviewSite";
     public bool AllowLivePublishing { get; set; }
     public string LiveContainerName { get; set; } = "$web";
