@@ -67,6 +67,36 @@ namespace HSPI_RiskRewardStatus.Tests
         }
 
         [Fact]
+        public void HolidayIsAClosedDayNotStalePrices()
+        {
+            // Thanksgiving 2026 at 11:00 AM Eastern: the newest quotes are Wednesday's close.
+            var now = Utc(2026, 11, 26, 16, 0);
+            var catalog = Catalog(now.AddMinutes(-1), Utc(2026, 11, 25, 21, 0));
+            AssertStatus(catalog, now, 1, "Prices may be stale");
+
+            catalog.MarketHoliday = new MarketHolidayNotice { Date = "2026-11-26", Name = "Thanksgiving Day" };
+            AssertStatus(catalog, now, 3, "Market closed: Thanksgiving Day");
+        }
+
+        [Fact]
+        public void YesterdaysHolidayNoticeDoesNotCloseToday()
+        {
+            var now = Utc(2026, 11, 27, 16, 0);
+            var catalog = Catalog(now.AddMinutes(-1), now.AddMinutes(-2));
+            catalog.MarketHoliday = new MarketHolidayNotice { Date = "2026-11-26", Name = "Thanksgiving Day" };
+            AssertStatus(catalog, now, 2, "Prices current");
+        }
+
+        [Fact]
+        public void ReadsTheHolidayNoticeFromPricesJson()
+        {
+            var catalog = Newtonsoft.Json.JsonConvert.DeserializeObject<PriceCatalog>(
+                "{\"generatedAt\":\"2026-11-26T15:59:00+00:00\",\"marketHoliday\":{\"date\":\"2026-11-26\",\"name\":\"Thanksgiving Day\"}," +
+                "\"quotes\":{\"TEST\":{\"quotedAt\":\"2026-11-25T21:00:00+00:00\",\"isStale\":false}}}");
+            AssertStatus(catalog, Utc(2026, 11, 26, 16, 0), 3, "Market closed: Thanksgiving Day");
+        }
+
+        [Fact]
         public void LongStaleListIsShortened()
         {
             var now = Utc(2026, 11, 11, 20, 15);

@@ -22,10 +22,15 @@ public static class MarketSchedule
         easternTime.DayOfWeek is not DayOfWeek.Saturday and not DayOfWeek.Sunday &&
         easternTime.TimeOfDay >= new TimeSpan(16, 0, 0) && easternTime.TimeOfDay <= new TimeSpan(16, 30, 0);
 
-    public static DateTimeOffset EffectiveQuoteTime(DateTimeOffset utcNow)
+    /// <summary>A weekday that is not a full-day market holiday in <paramref name="holidays"/>.</summary>
+    public static bool IsTradingDay(DateTime easternDate, IReadOnlySet<DateOnly>? holidays = null) =>
+        easternDate.DayOfWeek is not DayOfWeek.Saturday and not DayOfWeek.Sunday &&
+        (holidays is null || !holidays.Contains(DateOnly.FromDateTime(easternDate)));
+
+    public static DateTimeOffset EffectiveQuoteTime(DateTimeOffset utcNow, IReadOnlySet<DateOnly>? holidays = null)
     {
         var easternNow = TimeZoneInfo.ConvertTime(utcNow, Eastern);
-        var weekday = easternNow.DayOfWeek is not DayOfWeek.Saturday and not DayOfWeek.Sunday;
+        var weekday = IsTradingDay(easternNow.Date, holidays);
         if (weekday && easternNow.TimeOfDay >= new TimeSpan(9, 30, 0) && easternNow.TimeOfDay < new TimeSpan(16, 0, 0))
         {
             // Twelve Data's lightweight price endpoint has no observation timestamp. Use the
@@ -38,14 +43,14 @@ public static class MarketSchedule
 
         var closeDate = easternNow.Date;
         if (!weekday || easternNow.TimeOfDay < new TimeSpan(16, 0, 0)) closeDate = closeDate.AddDays(-1);
-        while (closeDate.DayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday) closeDate = closeDate.AddDays(-1);
+        while (!IsTradingDay(closeDate, holidays)) closeDate = closeDate.AddDays(-1);
         var localClose = DateTime.SpecifyKind(closeDate.AddHours(16), DateTimeKind.Unspecified);
         return new DateTimeOffset(localClose, Eastern.GetUtcOffset(localClose));
     }
 
-    public static bool IsCurrentMarketSession(DateTimeOffset observation, DateTimeOffset utcNow)
+    public static bool IsCurrentMarketSession(DateTimeOffset observation, DateTimeOffset utcNow, IReadOnlySet<DateOnly>? holidays = null)
     {
-        var expected = TimeZoneInfo.ConvertTime(EffectiveQuoteTime(utcNow), Eastern).Date;
+        var expected = TimeZoneInfo.ConvertTime(EffectiveQuoteTime(utcNow, holidays), Eastern).Date;
         var observed = TimeZoneInfo.ConvertTime(observation, Eastern).Date;
         return observed == expected;
     }
@@ -56,20 +61,21 @@ public static class MarketSchedule
     /// published as old, not as a fresh quote. During the first hour of a session yesterday's last
     /// trade is still accepted, because thinly traded listings may not have traded yet.
     /// </summary>
-    public static bool IsLaggingQuote(DateTimeOffset observation, DateTimeOffset utcNow, bool allowOpeningGrace = true)
+    public static bool IsLaggingQuote(DateTimeOffset observation, DateTimeOffset utcNow, bool allowOpeningGrace = true, IReadOnlySet<DateOnly>? holidays = null)
     {
-        var expected = TimeZoneInfo.ConvertTime(EffectiveQuoteTime(utcNow), Eastern).Date;
+        // On a market holiday the expected session is the last trading day before it, so the
+        // previous close is current and nothing is flagged.
+        var expected = TimeZoneInfo.ConvertTime(EffectiveQuoteTime(utcNow, holidays), Eastern).Date;
         var observed = TimeZoneInfo.ConvertTime(observation, Eastern).Date;
         if (observed >= expected) return false;
         if (!allowOpeningGrace) return true;
 
         var easternNow = TimeZoneInfo.ConvertTime(utcNow, Eastern);
-        var weekday = easternNow.DayOfWeek is not DayOfWeek.Saturday and not DayOfWeek.Sunday;
-        var firstHour = weekday && easternNow.TimeOfDay >= new TimeSpan(9, 30, 0) && easternNow.TimeOfDay < new TimeSpan(10, 30, 0);
+        var firstHour = IsTradingDay(easternNow.Date, holidays) && easternNow.TimeOfDay >= new TimeSpan(9, 30, 0) && easternNow.TimeOfDay < new TimeSpan(10, 30, 0);
         if (!firstHour) return true;
 
         var priorSession = expected.AddDays(-1);
-        while (priorSession.DayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday) priorSession = priorSession.AddDays(-1);
+        while (!IsTradingDay(priorSession, holidays)) priorSession = priorSession.AddDays(-1);
         return observed < priorSession;
     }
 
@@ -174,13 +180,15 @@ public sealed class PriceUpdateService
     private readonly PriceHistoryStore history;
     private readonly CurrencyConversionService currencyConversion;
     private readonly int eodhdDailyCallLimit;
+    private readonly MarketCalendarService? marketCalendar;
     // Listings for which Finnhub answered with an end-of-day price today (US OTC). Relearned each day,
     // so a listing that moves to an exchange goes back to Finnhub on its own.
     private readonly HashSet<string> endOfDayOnlyAtFinnhub = new(StringComparer.OrdinalIgnoreCase);
     private DateOnly learnedOn;
 
-    public PriceUpdateService(IEnumerable<IQuoteProvider> providers, IOptions<RiskRewardOptions> options, StateStore stateStore, ILogger<PriceUpdateService> logger, ProviderRunCsvLogger providerRuns, PriceHistoryStore history, CurrencyConversionService currencyConversion, IOptions<ProviderOptions> providerOptions)
+    public PriceUpdateService(IEnumerable<IQuoteProvider> providers, IOptions<RiskRewardOptions> options, StateStore stateStore, ILogger<PriceUpdateService> logger, ProviderRunCsvLogger providerRuns, PriceHistoryStore history, CurrencyConversionService currencyConversion, IOptions<ProviderOptions> providerOptions, MarketCalendarService? marketCalendar = null)
     {
+        this.marketCalendar = marketCalendar;
         this.providers = providers.ToList();
         this.options = options.Value;
         eodhdDailyCallLimit = providerOptions.Value.EodhdDailyCallLimit;
@@ -220,6 +228,12 @@ public sealed class PriceUpdateService
         var unlimitedEodhd = eodhd is not null && EodhdBudget.IsUnlimited(eodhdDailyCallLimit, catalog.Charts.Count);
         var today = DateOnly.FromDateTime(MarketSchedule.ToEastern(now).Date);
         if (today != learnedOn) { endOfDayOnlyAtFinnhub.Clear(); learnedOn = today; }
+        // Market holidays: on a closed day the previous close is the current price for that exchange.
+        var calendar = marketCalendar is null ? MarketCalendar.Empty : await marketCalendar.GetAsync(cancellationToken);
+        var chartsByTicker = catalog.Charts.GroupBy(chart => chart.TickerSymbol, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
+        IReadOnlySet<DateOnly> HolidaysFor(string ticker) =>
+            chartsByTicker.TryGetValue(ticker, out var listed) && IsCanadianListing(listed) ? calendar.CanadaClosed : calendar.UsClosed;
 
         var quotes = new Dictionary<string, Quote>(StringComparer.OrdinalIgnoreCase);
         var rationed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -229,7 +243,7 @@ public sealed class PriceUpdateService
         // A quote from an earlier session is not an answer: the next provider is asked for a newer one.
         List<RiskRewardChart> Lagging(bool allowOpeningGrace) => catalog.Charts.Where(chart =>
             !confirmedLatest.Contains(chart.TickerSymbol) && quotes.TryGetValue(chart.TickerSymbol, out var held) &&
-            MarketSchedule.IsLaggingQuote(held.QuotedAt, now, allowOpeningGrace)).ToList();
+            MarketSchedule.IsLaggingQuote(held.QuotedAt, now, allowOpeningGrace, HolidaysFor(chart.TickerSymbol))).ToList();
 
         async Task AskAsync(IQuoteProvider provider, List<RiskRewardChart> wanted)
         {
@@ -290,7 +304,7 @@ public sealed class PriceUpdateService
         var answeredQuotes = new Dictionary<string, Quote>(quotes, StringComparer.OrdinalIgnoreCase);
         // Stale means no same-day source answered. A listing whose latest trade, as confirmed by EODHD
         // this cycle, was in an earlier session simply has not traded yet today.
-        var laggingTickers = quotes.Where(pair => !confirmedLatest.Contains(pair.Key) && MarketSchedule.IsLaggingQuote(pair.Value.QuotedAt, now))
+        var laggingTickers = quotes.Where(pair => !confirmedLatest.Contains(pair.Key) && MarketSchedule.IsLaggingQuote(pair.Value.QuotedAt, now, true, HolidaysFor(pair.Key)))
             .Select(pair => pair.Key).OrderBy(ticker => ticker, StringComparer.OrdinalIgnoreCase).ToList();
         foreach (var ticker in laggingTickers)
             quotes[ticker] = quotes[ticker] with { IsStale = true, Error = "The data providers' latest quote is from an earlier trading session." };
@@ -304,7 +318,7 @@ public sealed class PriceUpdateService
             if (quotes.ContainsKey(chart.TickerSymbol)) continue;
             if (!previous.Quotes.TryGetValue(chart.TickerSymbol, out var old) || !MarketMetadata.QuoteMatchesChartCurrency(chart, old)) continue;
             // Between rationed EODHD cycles the last quote is still this session's and is kept as it was.
-            var keptBetweenCycles = rationed.Contains(chart.TickerSymbol) && !old.IsStale && !MarketSchedule.IsLaggingQuote(old.QuotedAt, now);
+            var keptBetweenCycles = rationed.Contains(chart.TickerSymbol) && !old.IsStale && !MarketSchedule.IsLaggingQuote(old.QuotedAt, now, true, HolidaysFor(chart.TickerSymbol));
             quotes[chart.TickerSymbol] = keptBetweenCycles ? old : old with
             {
                 IsStale = true,
@@ -312,7 +326,7 @@ public sealed class PriceUpdateService
             };
         }
         var exchangeRates = await GetPublishedExchangeRatesAsync(previous, cancellationToken);
-        await WritePricesAsync(target, new PriceCatalog { GeneratedAt = DateTimeOffset.UtcNow, Quotes = quotes, ExchangeRates = exchangeRates }, cancellationToken);
+        await WritePricesAsync(target, new PriceCatalog { GeneratedAt = DateTimeOffset.UtcNow, Quotes = quotes, ExchangeRates = exchangeRates, MarketHoliday = calendar.UsHolidayOn(today) }, cancellationToken);
         try { await history.UpdateAsync(target, catalog, answeredQuotes, cancellationToken); }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
         catch (Exception ex) { logger.LogError(ex, "Current prices were published, but the history update failed and will be retried on a later run."); }

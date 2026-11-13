@@ -109,7 +109,11 @@ public sealed class PriceCatalog
     public DateTimeOffset GeneratedAt { get; set; } = DateTimeOffset.UtcNow;
     public Dictionary<string, Quote> Quotes { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public Dictionary<string, PublishedExchangeRate> ExchangeRates { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+    /// <summary>Set only on a day the US market is closed for a holiday, so the site and monitors do not expect new prices.</summary>
+    public MarketHolidayNotice? MarketHoliday { get; set; }
 }
+
+public sealed record MarketHolidayNotice(DateOnly Date, string Name);
 
 public sealed record PublishedExchangeRate(
     string From,

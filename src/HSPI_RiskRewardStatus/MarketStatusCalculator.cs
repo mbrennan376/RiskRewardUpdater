@@ -12,6 +12,19 @@ namespace HSPI_RiskRewardStatus
 
         [JsonProperty("quotes")]
         public Dictionary<string, PriceQuote> Quotes { get; set; } = new Dictionary<string, PriceQuote>(StringComparer.OrdinalIgnoreCase);
+
+        // Published by the price service only on a day the US market is closed for a holiday.
+        [JsonProperty("marketHoliday")]
+        public MarketHolidayNotice MarketHoliday { get; set; }
+    }
+
+    internal sealed class MarketHolidayNotice
+    {
+        [JsonProperty("date")]
+        public string Date { get; set; }
+
+        [JsonProperty("name")]
+        public string Name { get; set; }
     }
 
     internal sealed class PriceQuote
@@ -41,7 +54,11 @@ namespace HSPI_RiskRewardStatus
             var explicitlyStale = quotes.All(quote => quote.IsStale);
             var easternNow = TimeZoneInfo.ConvertTime(now, Eastern);
             var weekday = easternNow.DayOfWeek != DayOfWeek.Saturday && easternNow.DayOfWeek != DayOfWeek.Sunday;
-            var marketOpen = weekday && easternNow.TimeOfDay >= new TimeSpan(9, 30, 0) && easternNow.TimeOfDay < new TimeSpan(16, 0, 0);
+            // A holiday is a closed day: no new prices are expected, only the last trading day's close.
+            var holiday = catalog.MarketHoliday;
+            var holidayToday = holiday != null && holiday.Date != null && holiday.Date.Length >= 10 &&
+                               holiday.Date.Substring(0, 10) == easternNow.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
+            var marketOpen = weekday && !holidayToday && easternNow.TimeOfDay >= new TimeSpan(9, 30, 0) && easternNow.TimeOfDay < new TimeSpan(16, 0, 0);
             bool stale;
             if (marketOpen)
             {
@@ -64,7 +81,8 @@ namespace HSPI_RiskRewardStatus
                 var names = string.Join(", ", staleTickers.Take(4)) + (staleTickers.Count > 4 ? ", +" + (staleTickers.Count - 4) : "");
                 return Status(1, staleTickers.Count + " of " + quotes.Count + " prices stale: " + names);
             }
-            return marketOpen ? Status(2, "Prices current") : Status(3, "Market closed");
+            if (marketOpen) return Status(2, "Prices current");
+            return Status(3, holidayToday && !string.IsNullOrWhiteSpace(holiday.Name) ? "Market closed: " + holiday.Name.Trim() : "Market closed");
         }
 
         private static bool HasRequiredCloseUpdate(DateTimeOffset generatedAt, DateTimeOffset easternNow)

@@ -26,6 +26,7 @@ builder.Services.AddSingleton<BackgroundPriceRefresh>();
 builder.Services.AddHttpClient<OpenAiChartAnalyzer>();
 builder.Services.AddHttpClient<OpenAiChartImageEditor>();
 builder.Services.AddHttpClient<CurrencyConversionService>();
+builder.Services.AddHttpClient<MarketCalendarService>();
 builder.Services.AddSingleton<IChartAnalyzer>(services => services.GetRequiredService<OpenAiChartAnalyzer>());
 builder.Services.AddSingleton<IChartImageEditor>(services => services.GetRequiredService<OpenAiChartImageEditor>());
 

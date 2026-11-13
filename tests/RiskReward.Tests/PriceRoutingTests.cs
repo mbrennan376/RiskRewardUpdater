@@ -94,10 +94,37 @@ public sealed class PriceRoutingTests : IDisposable
         Assert.Equal(1, result.LaggingCount);
     }
 
+    [Fact]
+    public async Task PublishesTodaysUsHolidayAndDoesNotFlagThePreviousClose()
+    {
+        var today = DateOnly.FromDateTime(MarketSchedule.ToEastern(DateTimeOffset.UtcNow).Date);
+        var holidays = $$"""{"data":[{"eventName":"Test Holiday","atDate":"{{today:yyyy-MM-dd}}","tradingHour":""}],"exchange":"US"}""";
+        var calendar = new MarketCalendarService(new HttpClient(new JsonHandler(holidays)),
+            Options.Create(new ProviderOptions { FinnhubApiKey = "test-key" }),
+            Options.Create(new RiskRewardOptions { StateFolder = Path.Combine(root, "state") }), NullLogger<MarketCalendarService>.Instance);
+        // The last trading day's close, as every provider reports it on a holiday.
+        var lastClose = MarketSchedule.EffectiveQuoteTime(DateTimeOffset.UtcNow, new HashSet<DateOnly> { today });
+        var finnhub = new FakeProvider("finnhub", symbol => symbol is "NVDA" or "DBOXF" ? new Quote("", 1m, lastClose, "finnhub") : null);
+        var eodhd = new FakeProvider("eodhd", symbol => symbol == "GSI.V" ? Fresh("eodhd", 1.62m, "CAD") : null);
+        var service = CreateService(dailyEodhdCalls: 0, calendar, new FakeProvider("twelveData", _ => null), finnhub, eodhd);
+
+        var result = await service.UpdateAsync();
+
+        var prices = await ReadPrices();
+        Assert.Equal(new MarketHolidayNotice(today, "Test Holiday"), prices.MarketHoliday);
+        Assert.All(prices.Quotes.Values, quote => Assert.False(quote.IsStale));
+        Assert.Equal(0, result.LaggingCount);
+        // Nothing is from an earlier session on a holiday, so EODHD is only asked for its own listing.
+        Assert.Equal([["GSI.V"]], eodhd.Requests);
+    }
+
     private static Quote Fresh(string provider, decimal price, string currency = "USD") =>
         new("", price, DateTimeOffset.UtcNow, provider, Currency: currency);
 
-    private PriceUpdateService CreateService(int dailyEodhdCalls, params IQuoteProvider[] providers)
+    private PriceUpdateService CreateService(int dailyEodhdCalls, params IQuoteProvider[] providers) =>
+        CreateService(dailyEodhdCalls, null, providers);
+
+    private PriceUpdateService CreateService(int dailyEodhdCalls, MarketCalendarService? calendar, params IQuoteProvider[] providers)
     {
         var site = Path.Combine(root, "site");
         Directory.CreateDirectory(site);
@@ -119,7 +146,13 @@ public sealed class PriceRoutingTests : IDisposable
         return new PriceUpdateService(providers, options, new StateStore(options), NullLogger<PriceUpdateService>.Instance,
             new ProviderRunCsvLogger(options), new PriceHistoryStore(options, NullLogger<PriceHistoryStore>.Instance),
             new CurrencyConversionService(new HttpClient(new OfflineHandler())),
-            Options.Create(new ProviderOptions { EodhdDailyCallLimit = dailyEodhdCalls }));
+            Options.Create(new ProviderOptions { EodhdDailyCallLimit = dailyEodhdCalls }), calendar);
+    }
+
+    private sealed class JsonHandler(string json) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+            Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(json, Encoding.UTF8, "application/json") });
     }
 
     private async Task<PriceCatalog> ReadPrices()

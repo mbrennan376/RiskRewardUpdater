@@ -28,6 +28,7 @@ builder.Services.AddHttpClient<TwelveDataQuoteProvider>();
 builder.Services.AddHttpClient<FinnhubQuoteProvider>();
 builder.Services.AddHttpClient<EodhdQuoteProvider>();
 builder.Services.AddHttpClient<CurrencyConversionService>();
+builder.Services.AddHttpClient<MarketCalendarService>();
 builder.Services.AddSingleton<IQuoteProvider>(services => services.GetRequiredService<TwelveDataQuoteProvider>());
 builder.Services.AddSingleton<IQuoteProvider>(services => services.GetRequiredService<FinnhubQuoteProvider>());
 builder.Services.AddSingleton<IQuoteProvider>(services => services.GetRequiredService<EodhdQuoteProvider>());
