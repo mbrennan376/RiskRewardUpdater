@@ -207,6 +207,7 @@ public sealed class PriceUpdateService
         var now = DateTimeOffset.UtcNow;
         var quotes = new Dictionary<string, Quote>(StringComparer.OrdinalIgnoreCase);
         var rationed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var confirmedLatest = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var eodhdRationed = false;
         foreach (var provider in orderedProviders)
         {
@@ -236,8 +237,14 @@ public sealed class PriceUpdateService
                 logger.LogWarning("Quote providers still missed {Count} symbols ({LaggingCount} with only an earlier-session quote); trying {Provider}.", wanted.Count, wanted.Count - missing.Count, provider.Name);
             var providerCatalog = new ChartCatalog { Charts = wanted };
             foreach (var pair in await GetQuotesSafelyAsync(provider, BuildSymbols(providerCatalog, provider.Name), cancellationToken))
-                if (!quotes.TryGetValue(pair.Key, out var held) || pair.Value.QuotedAt > held.QuotedAt)
+            {
+                // EODHD has same-day data, so its answer is the listing's latest trade even when that trade
+                // was in an earlier session (thinly traded OTC listings). It also wins a timestamp tie.
+                if (IsEodhd(provider)) confirmedLatest.Add(pair.Key);
+                if (!quotes.TryGetValue(pair.Key, out var held) || pair.Value.QuotedAt > held.QuotedAt ||
+                    (IsEodhd(provider) && pair.Value.QuotedAt == held.QuotedAt))
                     quotes[pair.Key] = pair.Value;
+            }
         }
 
         // The derived pass must not spend rationed EODHD calls on USD listings.
@@ -247,7 +254,9 @@ public sealed class PriceUpdateService
         await AddDerivedCadFallbacksAsync(catalog, quotes, derivedProviders, cancellationToken);
 
         var answeredQuotes = new Dictionary<string, Quote>(quotes, StringComparer.OrdinalIgnoreCase);
-        var laggingTickers = quotes.Where(pair => MarketSchedule.IsLaggingQuote(pair.Value.QuotedAt, now))
+        // Stale means no same-day source answered. A listing whose latest trade, as confirmed by EODHD
+        // this cycle, was in an earlier session simply has not traded yet today.
+        var laggingTickers = quotes.Where(pair => !confirmedLatest.Contains(pair.Key) && MarketSchedule.IsLaggingQuote(pair.Value.QuotedAt, now))
             .Select(pair => pair.Key).OrderBy(ticker => ticker, StringComparer.OrdinalIgnoreCase).ToList();
         foreach (var ticker in laggingTickers)
             quotes[ticker] = quotes[ticker] with { IsStale = true, Error = "The data providers' latest quote is from an earlier trading session." };
